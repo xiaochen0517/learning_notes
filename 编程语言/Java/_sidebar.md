@@ -4,6 +4,7 @@
   * [注解](/编程语言/Java/Java%20进阶/注解.md)
   * [泛型](/编程语言/Java/Java%20进阶/泛型.md)
   * [动态代理](/编程语言/Java/Java%20进阶/JDK动态代理.md)
+  * [枚举](/编程语言/Java/Java%20进阶/枚举.md)
 * Java WEB
   * [1、HTTP协议概念](/编程语言/Java/Java%20WEB/1、HTTP协议概念.md)
   * [2、Servlet](/编程语言/Java/Java%20WEB/2、Servlet.md)
