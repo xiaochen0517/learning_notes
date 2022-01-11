@@ -218,10 +218,10 @@ private static Class<?> getProxyClass0(ClassLoader loader, Class<?>... interface
 }
 ```
 
-
-
 根据获取到的代理类获取构造方法 `constructorParams` 参数就是 `InvocationHandler` 。
 
 ```java
 private static final Class<?>[] constructorParams = { InvocationHandler.class };
 ```
+
+==未完待续== 
