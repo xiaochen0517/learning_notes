@@ -6,11 +6,11 @@
 
 #### 并发是什么
 
-并发是指当有多个线程在操作时,如果系统同时之能执行一个线程，它只能把CPU运行时间划分成若干个时间段,再将时间 段分配给各个线程执行，在一个时间段的线程代码运行时，其它线程处于挂起状。这种方式称之为并发(Concurrent)。
+并发是指当有多个线程在操作时,如果系统同时之能执行一个线程，它只能把CPU运行时间划分成若干个时间段,再将时间 段分配给各个线程执行，在一个时间段的线程代码运行时，其它线程处于挂起状。这种方式称之为并发(`Concurrent`)。
 
 #### 并行是什么
 
-并行是当系统可同时执行的线程大于等于需要执行的线程数时，这时所有的线程都可以在同一时间同时执行，而这时程序的执行就被称为并行(parallel)。
+并行是当系统可同时执行的线程大于等于需要执行的线程数时，这时所有的线程都可以在同一时间同时执行，而这时程序的执行就被称为并行(`parallel`)。
 
 ### 进程和线程
 
@@ -22,11 +22,11 @@
 
 进程可以拥有多个线程，进程下的线程可以访问进程的资源及线程之间的数据。每个线程都有独自的缓存，如果线程读取了某个数据，那么它将会将这些数据存放到自己的缓存中以供使用。因此多线程程序最重要的一个目标就是要保证数据在多线程下的安全性。
 
-> 一个 JAVA 程序默认以一个进程的形式运行，在一个进程中使用不同的多个线程一起完成并行运行算或实现异步操作。
+> 一个 `JAVA` 程序默认以一个进程的形式运行，在一个进程中使用不同的多个线程一起完成并行运行算或实现异步操作。
 
 #### 进程与线程的关系
 
-一个进程包含一个或以上的线程，若只包含一个线程则这个线程被称为主线程。CPU的调度单位（也就是CPU真正执行的单位是线程），当CPU在执行多个线程时会通过时间片轮转来调度每个线程（如下图），当线程的数量小于CPU核数时才会“并行”执行。
+一个进程包含一个或以上的线程，若只包含一个线程则这个线程被称为主线程。 `CPU` 的调度单位（也就是 `CPU` 真正执行的单位是线程），当 `CPU` 在执行多个线程时会通过时间片轮转来调度每个线程（如下图），当线程的数量小于 `CPU` 核数时才会“并行”执行。
 
 ![image-20220119162307176](photo\32、多线程运行逻辑(7).png)
 
@@ -34,7 +34,7 @@
 
 #### Java 中的线程
 
-我们在编写Java程序时首先要编写一个main方法，而这个方法会在当前运行的Java进程的主线程中执行，可以使用以下的代码获取到当前执行的线程名称。
+我们在编写 `Java` 程序时首先要编写一个 `main` 方法，而这个方法会在当前运行的 `Java` 进程的主线程中执行，可以使用以下的代码获取到当前执行的线程名称。
 
 ```java
 public static void main(String[] args) {
@@ -42,21 +42,53 @@ public static void main(String[] args) {
 }
 ```
 
-当程序需要进行一些需要耗费大量时间进行的操作时（例如网络请求、I/O操作等），当这些操作依旧直接在主线程中执行时就会使主线程停止运行，直到操作完成程序才会继续运行，于是就需要多线程来执行这些操作防止主线程阻塞，将耗时操作放到子线程中执行。
+当程序需要进行一些需要耗费大量时间进行的操作时（例如网络请求、 `I/O` 操作等），当这些操作依旧直接在主线程中执行时就会使主线程停止运行，直到操作完成程序才会继续运行，于是就需要多线程来执行这些操作防止主线程阻塞，将耗时操作放到子线程中执行。
 
-### JUC 基础类介绍
+### 多线程基础类介绍
 
-#### Thread
+在Java中最重要的三个和线程相关的类是 `Thread` `Runnable` `Callable` ，其中 `Thread` 是真正创建和运行线程的类而其余两个只是接口，用于向 `Thread` 类中传入对象引用用于执行方法的。以下源代码中可以看到 `Runnable` 和 `Callable` 类并没有实质性的方法，真正创建线程和执行的是 `Thread` 类。Thread 类是线程类而 `Runnable` 和 `Callable` 是任务类，任务类只是将需要执行的任务进行封装后传入线程类来真正执行。
 
+![image-20220120091319719](photo\33、Runnable源码(7).png) 
 
+![image-20220120091409143](photo\34、Callable源码(7).png) 
 
-#### Runnable 和 Callable
+![image-20220120091519767](photo\35、Thread源码(7).png) 
 
+#### Thread 类
 
+在 `Thread` 类中，真正创建线程和执行的方法是本地方法 `start0` 
 
-## 基础使用
+```java
+private native void start0();
+```
 
-### 直接使用 Thread 类
+类中有一个名为 `target` 的变量，此变量就是需要执行的 `Runnable` 对象，而这个参数会在 `Thread` 类实例化时传入或者赋值为空。
+
+```java
+/* What will be run. */
+private Runnable target;
+```
+
+真正在线程中执行的代码是 `run` 方法中的代码，`Thread` 实现了 `Runnable` 接口同样也实现了 `run` 方法，以下是 `Thread` 类中实现的 `run` 方法的源代码。
+
+```java
+@Override
+public void run() {
+    if (target != null) {
+        target.run();
+    }
+}
+```
+
+在执行线程时判断是否有传入指定的 `Runnable` 对象，若存在则执行传入对象的 `run` 方法，否则直接结束。
+
+#### Callable 类
+
+`Callable` 类和 `Runnable` 类一样是一个接口类，不同之处在于 `Callable` 的 `call` 方法拥有返回值，而 `Runnable` 的 `run` 方法没有返回值。
+
+## Java 中的多线程
+
+### 使用 Thread 类创建线程
 
 ```java
 Thread thread = new Thread() {
@@ -68,7 +100,9 @@ Thread thread = new Thread() {
 thread.start();
 ```
 
-### 使用 Runnable
+此方法使用匿名内部类来继承 `Thread` 并重写其中的 `run` 方法，因为 `Thread` 是实现 `Runnable` 接口类，所以重写 `run` 方法后，使用 `start` 方法启动线程依旧可以实现相同的效果。
+
+### 使用 Runnable 传入 Thread 
 
 ```java
 new Thread(new Runnable(){
@@ -83,7 +117,9 @@ new Thread(() -> {
 }).start();
 ```
 
-### 使用线程池
+最普通的写法，使用 匿名内部类实例化 `Runnable` 接口，并将实例化的对象引用传入 `Thread` 对象中，最后调用 `start` 方法启动线程。
+
+### 使用线程池和 Callable
 
 ```java
 ExecutorService service = Executors.newSingleThreadExecutor();
@@ -100,9 +136,123 @@ System.out.println(resultString);
 service.shutdown();
 ```
 
+`Callable` 和 `Runnable` 是不同的，而 `Thread` 中是无法传入 `Callable` 对象的，这时就需要用到一个新技术线程池，使用 `Executors` 新建一个线程池，最后使用线程池的 `submit` 方法传入 `Callable` 对象进行线程的创建和执行。关于线程池相关请查看[Java线程池](#线程池) 
+
 ## FutureTask
 
 ### FutureTask 是什么
+
+要了解 `FutureTask` 是什么首先要了解这个类是为了解决什么问题，现在有一个场景，我们需要请求一个接口而这个网络请求是耗时操作，我们需要用到多线程技术，在请求发出后的一段时间之内我们需要在主线程中知道这个接口是否返回了数据，是否成功等情况。这时就需要用到 `FutureTask` 来实现这个需求，在此类中有很多方法可以让我们获取到线程的状态以及去操作线程。
+
+![image-20220120101305193](photo\36、FutureTask方法列表(7).png)
+
+### 使用 FutureTask
+
+```java
+public static void main(String[] args) throws ExecutionException, InterruptedException, TimeoutException {
+    FutureTask<String> futureTask = new FutureTask<>(new Callable<String>() {
+        @Override
+        public String call() throws Exception {
+            LOGGER.info("start thread");
+            Thread.sleep(2000L);
+            return "This is result data";
+        }
+    });
+    new Thread(futureTask).start();
+    LOGGER.info("Mission Is Done : {}", futureTask.isDone());
+    String result = futureTask.get();
+    // String result = futureTask.get(1, TimeUnit.SECONDS); // 在指定的时间超时后会抛出 TimeoutException
+    LOGGER.info("Mission Is Done : {}", futureTask.isDone());
+    LOGGER.info("Result Data : {}", result);
+}
+```
+
+- 在实例化 `FutureTask` 时传入 `Callable` 对象
+- 将 `FutureTask` 对象传入 Thread 并执行线程
+- 使用 `isDone` 方法检查是否执行完成
+- 使用 `get` 方法获取到返回的内容
+
+> `get` 方法有两个重载方法，一个无参数另一个需要传入超时时间，超时后抛出 `TimeoutException` 异常。
+>
+> 在执行 `get` 方法时，主线程会被阻塞，知道获取到返回结果或者超时。
+
+### 解析源码
+
+#### 实例化 FutureTask
+
+`FutureTask` 拥有两个构造方法，一个直接传入 `Callable` 对象，另一个传入 `Runnable` 对象和一个默认的返回值，因为 `FutureTask` 类默认是存在可以获取返回值的。
+
+```java
+public FutureTask(Callable<V> callable) {
+    if (callable == null)
+        throw new NullPointerException();
+    this.callable = callable;
+    this.state = NEW;       // ensure visibility of callable
+}
+
+public FutureTask(Runnable runnable, V result) {
+    this.callable = Executors.callable(runnable, result);
+    this.state = NEW;       // ensure visibility of callable
+}
+```
+
+在当传入的对象是 `Callable` 时，`FutureTask` 会直接将 `Callable` 赋值给属性。当传入的 `Runnable` 时会使用到线程池对象 `Executors` 的 `callable` 方法，将 `Runnable` 转换为 `Callable`。
+
+```java
+public static <T> Callable<T> callable(Runnable task, T result) {
+    if (task == null)
+        throw new NullPointerException();
+    return new RunnableAdapter<T>(task, result);
+}
+
+// RunnableAdapter
+static final class RunnableAdapter<T> implements Callable<T> {
+    final Runnable task;
+    final T result;
+    RunnableAdapter(Runnable task, T result) {
+        this.task = task;
+        this.result = result;
+    }
+    public T call() {
+        task.run();
+        return result;
+    }
+}
+```
+
+可以看到，`Runnable` 和 传入的返回值被传入到 `RunnableAdapter` 对象中，此对象实现 `Callable` 接口并在 `call` 方法中调用了 `Runnable` 的 `run` 方法，并将传入的返回值进行返回。至此，使用传入的 `Runnable` 对象和默认返回值转换为 `Callable` 对象。
+
+#### 传入到 Thread
+
+从下图可知，`FutureTask` 实现了 `RunnableFuture` 而 `RunnableFuture` 接口类继承了 `Runnable` 和 `Future` ，因此 `FutureTask` 本质上还是 `Runnable` ，所以可以直接传入 `Thread` 类中。
+
+![image-20220120112001460](photo\37、FutureTask继承结构图(7).png) 
+
+在 `FutureTask` 中的 `run` 方法最后还是执行的是 `Callable` 的 `call` 方法。
+
+#### FutureTask 如何包装 Runnable 和 Callable
+
+![image-20220120170609195](photo\38、FutureTask包装任务类(7).png) 
+
+#### get 方法
+
+`FutureTask` 使用以下状态用来区分当前线程的状态
+
+![image-20220120171941083](photo\39、FutureTask状态(7).png) 
+
+- `NEW` ：新建
+- `COMPLETING` ：即将完成
+- `NORMAL` ：完成
+- `EXECEPTIONAL` ：抛异常
+- `CANCELLED` ：任务取消
+- `INTERRRUPTING` ：任务即将被打断
+- `INTERRUPTED` ：任务被打断
+
+`get` 方法源码
+
+![image-20220120172607784](photo\40、FutureTask#get()源码(7).png) 
+
+`get` 方法会阻塞线程等待返回，阻塞部分的核心代码就是 `awaitDone` 方法。
 
 
 
