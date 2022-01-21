@@ -231,7 +231,7 @@ LOGGER.info("线程状态：{}", thread5.getState()); // TERMINATED
 
 正常执行完成的线程进入结束状态。
 
-#### 生命周期图
+#### 状态转换图
 
 ![image-20220121154348812](photo\42、Thread生命周期转换图(7).png)
 
@@ -366,11 +366,11 @@ static final class RunnableAdapter<T> implements Callable<T> {
 
 `get` 方法源码
 
-![image-20220120172607784](photo\40、FutureTask#get()源码(7).png) 
+![image-20220120172607784](photo/40、FutureTask#get()源码(7).png) 
 
 `get` 方法会阻塞线程等待返回，阻塞部分的核心代码就是 `awaitDone` 方法。
 
-![image-20220121091414977](photo\41、FutureTask#awaitDone()源码(7).png) 
+![image-20220121091414977](photo/41、FutureTask#awaitDone()源码(7).png) 
 
 关于阻塞部分，方法中使用了 `LockSupport` 这是一个阻塞线程工具类，提供了多种方法用来阻塞及唤醒线程。
 
@@ -429,11 +429,17 @@ public static void main(String[] args) throws InterruptedException {
 2022-01-21 09:44:02.007 [线程--1] INFO  java.lang.Thread - 线程恢复：1
 ```
 
-
-
 ## 线程间通信
 
 ### 什么是线程间通信
+
+同进程下的线程是可以访问共享数据的，线程间通信的定义为针对同一资源的操作有不同种类的线程。即为多个不同作用的线程操作同一资源，最经典的实例就是生产者消费者。
+
+### 生产者与消费者
+
+生产者消费者顾名思义就是生产产品的对象和消费产品的对象，在消费者消费时发现产品已经没有了，此时就要通知生产者进行生产。反之生产者生产出产品也需要通知消费者进行消费。
+
+#### 代码实现
 
 
 
