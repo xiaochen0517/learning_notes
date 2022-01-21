@@ -82,6 +82,19 @@ public void run() {
 
 在执行线程时判断是否有传入指定的 `Runnable` 对象，若存在则执行传入对象的 `run` 方法，否则直接结束。
 
+`Thread` 状态
+
+在 `java` 中 `Thread` 类有以下几种状态。
+
+- `NEW` ：初始状态
+- `RUNNABLE` ：运行状态
+- `BLOCKED` ：阻塞状态
+- `WAITING` ：等待状态
+- `TIMED_WAITING` ：有超时的等待状态
+- `TERMINATED` ：结束状态
+
+
+
 #### Callable 类
 
 `Callable` 类和 `Runnable` 类一样是一个接口类，不同之处在于 `Callable` 的 `call` 方法拥有返回值，而 `Runnable` 的 `run` 方法没有返回值。
@@ -118,6 +131,109 @@ new Thread(() -> {
 ```
 
 最普通的写法，使用 匿名内部类实例化 `Runnable` 接口，并将实例化的对象引用传入 `Thread` 对象中，最后调用 `start` 方法启动线程。
+
+#### 线程状态
+
+- `NEW` ：初始状态
+
+```java
+Thread thread1 = new Thread(() -> {
+    // nothing...
+});
+LOGGER.info("线程状态：{}", thread1.getState()); // NEW
+```
+
+当 `Thread` 对象不为空时，线程当前的状态为初始化状态。
+
+- `RUNNABLE` ：可运行状态
+
+```java
+Thread thread1 = new Thread(() -> {
+    // nothing...
+});
+thread1.start();
+LOGGER.info("线程状态：{}", thread1.getState()); // RUNNABLE
+```
+
+当执行 `start()` 方法时线程为可运行状态。
+
+- `BLOCKED` ：阻塞状态
+
+```java
+final int[] i = {0};
+
+new Thread(()->{
+    synchronized (i){
+        while (true){
+            i[0] = 1;
+        }
+    }
+}).start();
+
+Thread thread4 = new Thread(() -> {
+    synchronized (i){
+        i[0] = 1;
+    }
+});
+thread4.start();
+Thread.sleep(500L);
+LOGGER.info("线程状态：{}", thread4.getState()); // BLOCKED
+```
+
+当线程在等待同步锁时，为阻塞状态。
+
+- `WAITING` ：等待状态
+
+```java
+Thread thread2 = new Thread(() -> {
+    try {
+        testThread.waitRun();
+    } catch (InterruptedException e) {
+        e.printStackTrace();
+    }
+});
+thread2.start();
+Thread.sleep(500L);
+LOGGER.info("线程状态：{}", thread2.getState()); // WAITING
+// TestThread#waitRun()
+public synchronized void waitRun() throws InterruptedException {
+    this.wait();
+}
+```
+
+执行 `wait()` 方法后，线程进入等待状态。
+
+- `TIMED_WAITING` ：有超时的等待状态
+
+```java
+Thread thread3 = new Thread(() -> {
+    try {
+        Thread.sleep(1000L);
+    } catch (InterruptedException e) {
+        e.printStackTrace();
+    }
+});
+thread3.start();
+Thread.sleep(500L);
+LOGGER.info("线程状态：{}", thread3.getState()); // TIMED_WAITING
+```
+
+进入超时等待状态有两种方法，一种是使用 `sleep` 方法，另一种是使用 `wait(long time)` 方法。
+
+- `TERMINATED` ：结束状态
+
+```java
+Thread thread5 = new Thread(() -> {});
+thread5.start();
+Thread.sleep(500L);
+LOGGER.info("线程状态：{}", thread5.getState()); // TERMINATED
+```
+
+正常执行完成的线程进入结束状态。
+
+#### 生命周期图
+
+![image-20220121154348812](photo\42、Thread生命周期转换图(7).png)
 
 ### 使用线程池和 Callable
 
@@ -254,9 +370,74 @@ static final class RunnableAdapter<T> implements Callable<T> {
 
 `get` 方法会阻塞线程等待返回，阻塞部分的核心代码就是 `awaitDone` 方法。
 
+![image-20220121091414977](photo\41、FutureTask#awaitDone()源码(7).png) 
+
+关于阻塞部分，方法中使用了 `LockSupport` 这是一个阻塞线程工具类，提供了多种方法用来阻塞及唤醒线程。
+
+```java
+public static void park(Object blocker); // 暂停当前线程
+public static void parkNanos(Object blocker, long nanos); // 暂停当前线程，不过有超时时间的限制
+public static void parkUntil(Object blocker, long deadline); // 暂停当前线程，直到某个时间
+public static void park(); // 无期限暂停当前线程
+public static void parkNanos(long nanos); // 暂停当前线程，不过有超时时间的限制
+public static void parkUntil(long deadline); // 暂停当前线程，直到某个时间
+public static void unpark(Thread thread); // 恢复当前线程
+public static Object getBlocker(Thread t);
+```
+
+#### LockSupport 简单使用
+
+使用 `LockSupport` 阻塞线程后唤醒。
+
+```java
+public static void main(String[] args) throws InterruptedException {
+    List<Thread> threadList = new ArrayList<>();
+
+    for (int i = 0; i < 5; i ++){
+        int finalI = i;
+        Thread thread = new Thread(() -> {
+            LOGGER.info("启动线程：{}", finalI);
+            LockSupport.park();
+            LOGGER.info("线程恢复：{}", finalI);
+        });
+        thread.setName("线程--"+finalI);
+        thread.start();
+        threadList.add(thread);
+    }
+
+    Thread.sleep(2000L);
+    LOGGER.info("主线程恢复");
+    for (Thread thread : threadList) {
+        LockSupport.unpark(thread);
+    }
+}
+```
+
+结果
+
+```java
+2022-01-21 09:43:59.993 [线程--0] INFO  java.lang.Thread - 启动线程：0
+2022-01-21 09:43:59.993 [线程--2] INFO  java.lang.Thread - 启动线程：2
+2022-01-21 09:43:59.993 [线程--1] INFO  java.lang.Thread - 启动线程：1
+2022-01-21 09:43:59.993 [线程--3] INFO  java.lang.Thread - 启动线程：3
+2022-01-21 09:43:59.993 [线程--4] INFO  java.lang.Thread - 启动线程：4
+2022-01-21 09:44:02.007 [main] INFO  java.lang.Thread - 主线程恢复
+2022-01-21 09:44:02.007 [线程--0] INFO  java.lang.Thread - 线程恢复：0
+2022-01-21 09:44:02.007 [线程--4] INFO  java.lang.Thread - 线程恢复：4
+2022-01-21 09:44:02.007 [线程--3] INFO  java.lang.Thread - 线程恢复：3
+2022-01-21 09:44:02.007 [线程--2] INFO  java.lang.Thread - 线程恢复：2
+2022-01-21 09:44:02.007 [线程--1] INFO  java.lang.Thread - 线程恢复：1
+```
 
 
-## 线程间通信与阻塞队列
+
+## 线程间通信
+
+### 什么是线程间通信
+
+
+
+## 阻塞队列
 
 
 
