@@ -441,6 +441,220 @@ public static void main(String[] args) throws InterruptedException {
 
 #### 代码实现
 
+- 轮询实现
+
+```java
+public class WhileQueueTestClass extends BasicLogger {
+
+    public static void main(String[] args) {
+        // 队列
+        WhileQueue<String> queue = new WhileQueue<>();
+
+        // 生产者
+        new Thread(() -> {
+            for (int i = 0; i < 100; i++) {
+                try {
+                    queue.put("消息" + i);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
+
+        // 消费者
+        new Thread(() -> {
+            for (int i = 0; i < 100; i++) {
+                try {
+                    queue.take();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
+    }
+
+    /**
+     * 轮询版本
+     */
+    public static class WhileQueue<T> {
+        // 容器，用来装东西
+        private final LinkedList<T> queue = new LinkedList<>();
+
+        public void put(T resource) throws InterruptedException {
+            while (queue.size() >= 1) {
+                // 队列满了，不能再塞东西了，轮询等待消费者取出数据
+                System.out.println("生产者：队列已满，无法插入...");
+                TimeUnit.MILLISECONDS.sleep(1000);
+            }
+            System.out.println("生产者：插入" + resource + "!!!");
+            queue.addFirst(resource);
+        }
+
+        public void take() throws InterruptedException {
+            while (queue.size() <= 0) {
+                // 队列空了，不能再取东西，轮询等待生产者插入数据
+                System.out.println("消费者：队列为空，无法取出...");
+                TimeUnit.MILLISECONDS.sleep(1000);
+            }
+            System.out.println("消费者：取出消息!!!");
+            queue.removeLast();
+            TimeUnit.MILLISECONDS.sleep(5000);
+        }
+
+    }
+}
+```
+
+轮询状态线程并没有处于等待或休眠状态，而是一直处于运行状态，因此这种方法会极大程度的消耗性能，造成很多无所谓的消耗。
+
+- 等待唤醒 `wait/notify` 
+
+使用 `wait` 方法可以使线程进入等待状态，使用 `notify` 随机唤醒一个等待中的线程，使用 `notifyAll` 唤醒所有等待中的线程。
+
+```java
+public class ThreadQueueTestClass {
+
+    public static void main(String[] args) {
+        // 队列
+        WaitNotifyQueue<String> queue = new WaitNotifyQueue<>();
+
+        // 生产者
+        new Thread(() -> {
+            for (int i = 0; i < 100; i++) {
+                try {
+                    queue.put("消息" + i);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }, "生产者--1").start();
+
+        // 消费者
+        new Thread(() -> {
+            for (int i = 0; i < 100; i++) {
+                try {
+                    queue.take();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }, "消费者--1").start();
+
+    }
+
+    public static class WaitNotifyQueue<T> extends BasicLogger {
+        // 容器队列，用于放置生产的产品
+        private final LinkedList<T> queue = new LinkedList<>();
+
+        public synchronized void put(T resource) throws InterruptedException {
+            while (queue.size() >= 1) {
+                // 队列中已经存在内容
+                LOGGER.info("生产者：队列已满，无法继续");
+                this.wait();
+            }
+            LOGGER.info("生产者：生产 {} ", resource);
+            queue.addFirst(resource);
+            this.notifyAll();
+        }
+
+        public synchronized void take() throws InterruptedException {
+            while (queue.size() <= 0) {
+                // 队列无内容
+                LOGGER.info("消费者：队列为空，无法继续");
+                this.wait();
+            }
+            LOGGER.info("消费者：使用产品");
+            queue.removeLast();
+            this.notifyAll();
+        }
+    }
+}
+```
+
+> - 为什么使用 `notifyAll` 
+>
+>   - 当使用的方法为 `notify` 时，此方法会随机唤醒一个线程，当生产者线程为多个时，有可能因为两次唤醒的都是生产者线程导致程序阻塞。
+>
+> - 为什么 `LinkedList` 是 `final` 状态
+>
+>   - 因为两个方法执行时是不同的线程，在子线程中只可以访问常量，所以需要使用 `final` 修饰。
+>
+> - 为什么方法中需要使用 `syncronized` 同步锁
+>
+>   - 因为 ` queue` 是生产者线程和消费者线程都需要操作的对象，所以需要保证此对象的原子性，即此对象不可以同时被多个线程修改，所以需要方法上添加 `syncronized` 同步锁，保证同一时间只有一个线程在修改此对象。
+>
+> 注：线程在执行 `wait` 方法后进入 `WAITING` 状态，此状态必须使用 `notify` 唤醒之后才可以继续执行，否则将会一直处于 `WAITING` 状态导致程序阻塞，这也是为什么要使用 `notifyAll` 的原因。
+
+- 等待唤醒 `condition` 
+
+```java
+public class ConditionQueueTestClass extends BasicLogger {
+
+    public static void main(String[] args) {
+        ConditionQueue<String> queue = new ConditionQueue<>();
+        new Thread(()->{
+            try {
+                for (;;){
+                    queue.put("resource");
+                }
+            }catch (Exception e){
+                e.printStackTrace();
+            }
+        }, "生产者-1").start();
+
+        new Thread(()->{
+            try {
+                for (;;){
+                    queue.take();
+                }
+            }catch (Exception e){
+                e.printStackTrace();
+            }
+        }, "消费者-1").start();
+
+    }
+
+    public static class ConditionQueue<T>{
+        private final LinkedList<T> queue = new LinkedList<>();
+
+        // 显式锁
+        private final ReentrantLock lock = new ReentrantLock();
+        private final Condition producerCondition = lock.newCondition();
+        private final Condition consumerCondition = lock.newCondition();
+
+        public void put(T resource) throws InterruptedException {
+            lock.lock();
+            try {
+                while (queue.size() >= 1){
+                    LOGGER.info("线程：{} ；队列已满", Thread.currentThread().getName());
+                    producerCondition.await();
+                }
+                LOGGER.info("线程：{} ；生产产品", Thread.currentThread().getName());
+                queue.push(resource);
+                consumerCondition.signal();
+            }finally {
+                lock.unlock();
+            }
+        }
+
+        public void take() throws InterruptedException {
+            lock.lock();
+            try {
+                while (queue.size() <= 0){
+                    LOGGER.info("线程：{} ；没有产品", Thread.currentThread().getName());
+                    consumerCondition.await();
+                }
+                LOGGER.info("线程：{} ；消费产品", Thread.currentThread().getName());
+                queue.pop();
+                producerCondition.signal();
+            }finally {
+                lock.unlock();
+            }
+        }
+    }
+}
+```
+
 
 
 ## 阻塞队列
