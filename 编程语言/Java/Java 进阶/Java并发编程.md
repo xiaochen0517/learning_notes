@@ -655,15 +655,206 @@ public class ConditionQueueTestClass extends BasicLogger {
 }
 ```
 
+`condition` 使用 `ReentrantLock` 对象的 `newCondition` 方法创建，可以将 `condition` 理解为一个储存线程的队列。当在线程中执行 `Condition#await()` 方法时，线程就会被移入相应的队列，当执行指定 `Condition` 的 `signal` 或者 `signalAll` 方法时就会唤醒指定队列中的线程。
+
+关于 `ReentrantLock` 相关知识请查看 [ReentrantLock详解](# ReentrantLock)
+
+## 锁
+
+
+
+### ReentrantLock
+
 
 
 ## 阻塞队列
 
+上方生产者与消费者的实例代码中，将一个普通的 `LinkedList` 包装为一个类，这个类中分别存在存入和取出的方法，在 `JDK` 中有着相同功能的实现，被称为阻塞队列 `blocking queue` 可以使用这些定义好的阻塞队列解决在多线程下集合及链表存取带来的安全性问题。
 
+在 `JDK` 中的 `JUC (java.util.concurrent)` 包下有着将各种阻塞队列的实现，包括 `ArrayBlockingQueue` 、`LinkedBlockingQueue` 、`PriorityBlockQueue` 。
+
+### 实现一个简单的阻塞队列
+
+通过继承 `LinkedList` 实现与原生 `LinkedBlockingQueue` 相似的功能。
+
+```java
+public class MoChenBlockingQueue<T> extends LinkedList<T> implements BasicLogger {
+
+    private long MAX_SIZE = 10;
+
+    public MoChenBlockingQueue(){}
+
+    public MoChenBlockingQueue(long capacity){
+        if (capacity <= 0){
+            throw new IllegalArgumentException("不可小于等于0");
+        }
+        this.MAX_SIZE = capacity;
+    }
+
+    public synchronized void put(T resource) throws InterruptedException {
+        while (super.size() >= MAX_SIZE){
+            LOGGER.info("队列已满");
+            this.wait();
+        }
+        LOGGER.info("插入内容，插入前大小：{}", super.size());
+        super.push(resource);
+        this.notifyAll();
+    }
+
+    public synchronized T take() throws InterruptedException {
+        while (super.size() <= 0){
+            LOGGER.info("队列已空");
+            this.wait();
+        }
+        LOGGER.info("取出内容，取出前大小：{}", super.size());
+        T pop = super.pop();
+        this.notifyAll();
+        return pop;
+    }
+
+
+}
+```
+
+### 原生阻塞队列
+
+#### 队列与阻塞队列继承链对比
+
+**`ArrayList` 与 `ArrayBlockingQueue` 继承链对比** 
+
+![43、List阻塞队列对比(7)](photo/43、List阻塞队列对比(7).png) 
+
+`ArrayList` 和 `ArrayBlockingQueue` 同样最终实现了 `Collection` 接口，阻塞队列最终的实现代码都在 `ArrayBlockingQueue` 中，其父类 `AbstarctQueue` 中只有一些简单的逻辑定义及异常抛出。
+
+**`LinkedList` 与 `LinkedBlockingQueue` 继承链对比** 
+
+![44、链表阻塞队列对比(7)](photo/44、链表阻塞队列对比(7).png) 
+
+同上面的 `ArrayBlockingQueue` 一样，其具体的阻塞实现也是在 `LinkedBlockingQueue` 类中。
+
+#### LinkedBlockingQueue 源码解析
+
+**构造方法** 
+
+```java
+public LinkedBlockingQueue() {
+    this(Integer.MAX_VALUE);
+}
+
+public LinkedBlockingQueue(int capacity) {
+    if (capacity <= 0) throw new IllegalArgumentException();
+    this.capacity = capacity;
+    last = head = new Node<E>(null);
+}
+```
+
+无参构造方法调用了第二个有参构造，传入的 `capacity` 是此链表的最大值，即没有指定最大值时默认使用 `Integer` 的最大值，即为 `0x7fffffff;` $2^{31}-1$ 。
+
+1. 检查传入的数字，不可小于1抛出非法参数错误。
+2. 将参数赋值到类属性 `capacity` 中，即为链表最大值。
+3. 将属性 `last` 和 `head` 赋值为单向链表。
+
+单项链表（`LinkedBlockingQueue` 静态内部类）：
+
+```
+static class Node<E> {
+    E item;
+    Node<E> next;
+    Node(E x) { item = x; }
+}
+```
+
+- `item` 当前节点值。
+- `next` 下一个节点。
+
+传入集合的构造方法（用于将集合转为链表阻塞队列）：
+
+```java
+public LinkedBlockingQueue(Collection<? extends E> c) {
+    this(Integer.MAX_VALUE);
+    final ReentrantLock putLock = this.putLock;
+    putLock.lock(); // Never contended, but necessary for visibility
+    try {
+        int n = 0;
+        for (E e : c) {
+            if (e == null)
+                throw new NullPointerException();
+            if (n == capacity)
+                throw new IllegalStateException("Queue full");
+            enqueue(new Node<E>(e));
+            ++n;
+        }
+        count.set(n);
+    } finally {
+        putLock.unlock();
+    }
+}
+```
+
+1. 首先使用第二个带参构造实例化对象。
+2. 使用 `ReentrantLock` 。
+3. 遍历传入的集合。
+   1. 为空抛出空指针异常。
+   2. 传入集合等于链表最大值时抛出异常状态 `Queue full` 队列已满。
+4. 将遍历的集合元素使用 `enqueue` 方法依次送入链表中。
+5. 使用 `count.set()` 方法设置链表现有元素数量。
+6. `unlock` 解锁。
+
+**`offer` 方法** 
+
+```java
+public boolean offer(E e) {
+    if (e == null) throw new NullPointerException(); // 1
+    final AtomicInteger count = this.count;
+    if (count.get() == capacity)
+        return false;	
+    int c = -1;
+    Node<E> node = new Node<E>(e);
+    final ReentrantLock putLock = this.putLock;
+    putLock.lock();
+    try {
+        if (count.get() < capacity) {
+            enqueue(node);
+            c = count.getAndIncrement(); // 将count递增加一返回原值
+            if (c + 1 < capacity)
+                notFull.signal();
+        }
+    } finally {
+        putLock.unlock();
+    }
+    if (c == 0)
+        signalNotEmpty();
+    return c >= 0;
+}
+
+private void signalNotEmpty() {
+    final ReentrantLock takeLock = this.takeLock;
+    takeLock.lock();
+    try {
+        notEmpty.signal();
+    } finally {
+        takeLock.unlock();
+    }
+}
+```
+
+1. 检查参数是否为空。
+2. 检查当前链表元素大小是否为最大。
+3. 启动锁。
+4. 再次判断当前获取锁后链表元素大小。
+5. `enqueue` 存入元素。
+6. `count` 添加技术。
+7. 如果链表放入元素后的大小依旧小于链表容量，唤醒 `putLock` （存元素锁）的 `Condition` 中任意线程。
+8. 释放锁 `unlock` 。
+9. 若当前添加完成元素后链表大小为1（`c` 初始化值为 `-1` ，而 `getAndIncrement` 方法返回值为加一前的值，即为链表添加这个元素前的大小，当判断 `c == 0` 为 `true` 时则当前添加的元素为这个链表唯一的元素。），唤醒 `tackLock` （取元素锁）对应的 `Condition` 中的任意线程。
+
+**`put` 方法** 
+
+
+
+可以看到在 `put` 方法中使用了 `ReentrantLock` 来保证多线程数据的原子性。
+
+在 `LinkedLockingQueue` 中声明了两个锁和对应的两个线程队列，分别用于存取数据 `put/take` 
 
 ## 线程池
-
-
-
-## 锁
 
