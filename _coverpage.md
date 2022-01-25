@@ -7,5 +7,5 @@
 - [HTML/CSS/JS]()
 - [VUE]()
 
-[GitHub](https://github.com/xiaohcen0517)
+[GitHub](https://github.com/xiaochen0517)
 [起步](README.md)

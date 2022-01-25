@@ -366,11 +366,11 @@ static final class RunnableAdapter<T> implements Callable<T> {
 
 `get` 方法源码
 
-![image-20220120172607784](photo/40、FutureTask#get()源码(7).png) 
+![图片](photo\40、FutureTask_get()源码(7).png) 
 
 `get` 方法会阻塞线程等待返回，阻塞部分的核心代码就是 `awaitDone` 方法。
 
-![image-20220121091414977](photo/41、FutureTask#awaitDone()源码(7).png) 
+![image-20220121091414977](photo/41、FutureTask_awaitDone()源码(7).png) 
 
 关于阻塞部分，方法中使用了 `LockSupport` 这是一个阻塞线程工具类，提供了多种方法用来阻塞及唤醒线程。
 
@@ -661,7 +661,295 @@ public class ConditionQueueTestClass extends BasicLogger {
 
 ## 锁
 
+### AQS
 
+`AQS` 全称 `AbstractQueuedSynchronizer` （抽象队列同步器），`AQS` 定义了一套多线程访问共享资源的同步器框架，许多同步类实现都依赖于 `AQS` 例如 `ReentrantLock` 等。
+
+#### 概述
+
+**`CLH` 队列锁** 
+
+`CLH` 锁是有由 `Craig` ,  `Landin` ,  `and Hagersten` 这三个人发明的锁，取了三个人名字的首字母，所以叫 `CLH Lock` 。
+
+`CLH` 队列锁也是一种基于**链表**的可扩展、高性能、公平的自旋锁，申请线程仅仅在本地变量上自旋，它不断轮询前驱的状态，假设发现前驱释放了锁就结束自旋。
+
+
+
+#### 源码详解
+
+##### Node 静态内部类
+
+###### waitStatus属性
+
+```java
+volatile int waitStatus;
+```
+
+下面是已经定义好的状态
+
+```java
+/** waitStatus value to indicate thread has cancelled */
+static final int CANCELLED =  1;
+/** waitStatus value to indicate successor's thread needs unparking */
+static final int SIGNAL    = -1;
+/** waitStatus value to indicate thread is waiting on condition */
+static final int CONDITION = -2;
+/** waitStatus value to indicate the next acquireShared should unconditionally propagate */
+static final int PROPAGATE = -3;
+```
+
+- `CANCELLED 1` ：表示当前结点已取消调度。当timeout或被中断（响应中断的情况下），会触发变更为此状态，进入该状态后的结点将不会再变化。	
+- `SIGNAL -1` ：表示后继结点在等待当前结点唤醒。后继结点入队时，会将前继结点的状态更新为 `SIGNAL` 。
+- `CONDITION -2` ：表示结点等待在 `Condition` 上，当其他线程调用了 `Condition` 的 `signal()` 方法后， `CONDITION` 状态的结点将从等待队列转移到同步队列中，等待获取同步锁。
+- `PROPAGATE -3` ：共享模式下，前继结点不仅会唤醒其后继结点，同时也可能会唤醒后继的后继结点。
+- `0` ：新结点入队时的默认状态。
+
+> 负值为节点处于有效状态，正值则表示节点已经取消。
+
+###### Node类中其他属性
+
+```java
+volatile Node prev; // 上一个node
+volatile Node next; // 下一个node
+volatile Thread thread; // 当前节点储存的线程，实例化Node时传入，使用后置空。
+```
+
+由此可见， `Node` 其实是一个双向链表。
+
+![image-20220125095028713](photo/45、CLH队列Node图示1(7).png)
+
+##### AbstractQueuedSynchronizer类
+
+###### AQS中的head和tail属性
+
+```java
+private transient volatile Node head; // 指向线程链表的第一个node
+private transient volatile Node tail; // 指向线程链表的最后一个node
+```
+
+![image-20220125104832047](photo/46、CLH队列Node图示2(7).png)
+
+###### acquire(int)方法详解
+
+```java
+public final void acquire(int arg) {
+    if (!tryAcquire(arg) && // 直接尝试获取资源
+        acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+        selfInterrupt(); // 中断当前线程
+}
+```
+
+在独占模式下获取资源，若获取到资源直接返回线程，否则进入等待队列直到获取到资源后为止，整个过程忽略中断的影响。
+
+`tryAcquire` 方法：
+
+
+```java
+// 此方法用户尝试以独占模式获取，成功为true
+protected boolean tryAcquire(int arg) {
+    throw new UnsupportedOperationException();
+}
+```
+
+使用此方法直接去获取资源，成功返回 `true` 。此处因为 `AQS` 只是一个框架，所以此处没有真正的实现，需要在自定义同步器中去实现。
+
+> 既然 `AQS` 类只是一个框架，为什么没有被定义为 `abstract` ？
+>
+> 因为独占模式只需要实现 `tryAcquire` `tryRelease` ，共享模式只需要实现 `tryAcquireShared` `tryReleaseShared` ，如果定义为抽象类每个模式都需要去实现另一个模式下的接口，所以为了避免一些不必要的代码所以定义为一个普通类。
+
+`addWaiter` 方法：
+
+
+```java
+private Node addWaiter(Node mode) {
+    Node node = new Node(Thread.currentThread(), mode); // 包装为node
+    // Try the fast path of enq; backup to full enq on failure
+    Node pred = tail;
+    if (pred != null) { // 队列尾部不为空
+        node.prev = pred; // 当前node中prev指向目前的队尾node
+        if (compareAndSetTail(pred, node)) { // 将tail替换为当前node
+            pred.next = node; // 将之前的队尾node的next指向当前的node
+            return node; // 返回当前node
+        }
+    }
+    enq(node); // 自旋，直到成功添加node
+    return node; // 返回当前node
+}
+```
+
+将当前的线程加入等待队列的末尾，并返回当前线程生产的节点。传入的 `mode` 是一个空值，表示当前的模式为独占模式，在此方法中 `Node` 类中的 `nextWaiter` 参数会等于空。
+
+`enq` 方法：
+
+```java
+private Node enq(final Node node) {
+    for (;;) { // 自旋
+        Node t = tail;
+        if (t == null) { // 如果当前尾部指向为null，则表示没有初始化
+            if (compareAndSetHead(new Node())) // 将head和tail设置为同一个空node
+                tail = head;
+        } else { // 以下代码与addWaiter中添加节点部分代码相同
+            node.prev = t;
+            if (compareAndSetTail(t, node)) {
+                t.next = node;
+                return t;
+            }
+        }
+    }
+}
+```
+
+自旋循环，若 `tail` 指向的尾部为空时，将头和尾都设置为同一个空的 `node` ，若 `tail` 指向的 `node` 不为空，则执行与 `addWaiter` 中添加节点相同的代码进行添加，最后返回当前的 `node` 。
+
+`acquireQueued` 方法：
+
+
+```java
+final boolean acquireQueued(final Node node, int arg) {
+    boolean failed = true; // 是否成功拿到资源
+    try {
+        boolean interrupted = false; // 等待过程中是否有中断
+        for (;;) {
+            final Node p = node.predecessor(); // 获取当前节点的上一个节点
+            // 当前节点的上一个节点是头部节点并且尝试去获取资源
+            if (p == head && tryAcquire(arg)) { 
+                setHead(node); // 获取到资源后，将当前节点设置为头部节点
+                p.next = null; // 将之前的头部节点进行置空方便垃圾回收
+                failed = false; // 已经成功拿到资源了，重新设置一下标记
+                return interrupted; // 将是否有中断返回
+            }
+            if (shouldParkAfterFailedAcquire(p, node) && // 线程应该阻塞是为true
+                parkAndCheckInterrupt()) // 当线程需需要阻塞时，将线程阻塞进入等待状态
+                interrupted = true; // 将中断设置为true
+        }
+    } finally {
+        if (failed) // 获取资源失败
+            cancelAcquire(node); // 取消节点在队列的等待
+    }
+}
+```
+
+进入这一步的线程已经使用 `addWaiter` 方法将当前线程放入了等待队列中，此方法需要做的就是等待队列中当前线程之前的线程执行完毕后唤醒自己。所以，代码中使用了自旋，不断获取当前线程所属节点的上一个节点，如果上一个节点变成了头结点，说明当前节点时等待队列中的而第二个节点。随即使用 `tryAcquire` 方法去尝试获取资源，若获取到资源则将 `head` 修改为当前节点，并返回是否存在中断。如果当前节点不是第二个节点，或者当前线程没有获取到资源，则会使用 `shouldParkAfterFailedAcquire` 方法清理当前节点前已经失效的节点，并使用 `parkAndCheckInterrupt` 阻塞线程并返回是否存在中断。当目前节点的上一个节点状态处于 `SIGNAL` （需要唤醒下一级节点），并且线程存在中断时，会将 `interrupted` 设置为 `true` 后继续循环。
+
+1. 节点加入队尾后，检查状态并使用 `park` 阻塞线程等待唤醒。
+2. 被唤醒后，尝试获取资源。
+   1. 获取成功，将 `head` 指向此节点，并返回线程是否存在中断。
+   2. 获取失败，继续循环执行阻塞，等待唤醒。
+
+`shouldParkAfterFailedAcquire` 方法：
+
+```java
+private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
+    int ws = pred.waitStatus; // 获取当前节点上一级节点的状态
+    if (ws == Node.SIGNAL) // 当上一级节点的状态，标记为需要唤醒当前节点时直接返回true
+        return true;
+    if (ws > 0) { // 上一级节点已经为取消状态
+        do {
+            node.prev = pred = pred.prev; // 将取消状态的节点从链表中删除
+        } while (pred.waitStatus > 0); // 循环删除知道遇到不为取消状态的节点为止
+        pred.next = node; // 将删除节点的上一级节点中的next指向当前节点
+    } else { // 小于等于0不定于-1时
+        // 更新上一级节点中的waitStatus的值为-1，安全修改，以防上一级节点刚刚取消
+        compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
+    }
+    return false;
+}
+```
+
+如果上一个节点的状态不为 `SIGNAL` ，则会将上一级节点修改为 `SIGNAL` 。如果上一级节点状态为已取消，则会将节点删除到非取消状态的节点。
+
+`parkAndCheckInterrupt` 方法：
+
+```java
+private final boolean parkAndCheckInterrupt() {
+    LockSupport.park(this); // 将线程进入等待状态
+    return Thread.interrupted(); // 如果被唤醒，检查是否为中断
+}
+```
+
+在被 `park` 方法进入 `waiting` 状态下的线程中，可以被 `unpark` 和 `interrupt` 方法唤醒。
+
+> 需要注意的是， `Thread.interrupted()` 会清除当前线程的中断标记位，若中断的线程在第一调用时返回 `true` 在第二次调用时则会返回 `false` 。
+
+`cancelAcquire` 方法：
+
+```java
+private void cancelAcquire(Node node) {
+    if (node == null) // 忽略空值
+        return;
+
+    node.thread = null; // 将节点中储存的线程置空
+
+    Node pred = node.prev;
+    while (pred.waitStatus > 0) // 删除已经成为取消状态的上级节点
+        node.prev = pred = pred.prev;
+
+    Node predNext = pred.next;
+    node.waitStatus = Node.CANCELLED; // 将节点设置为取消状态
+
+    // 当尾结点是传入的节点时，将tail设置为传入node的上一级node
+    if (node == tail && compareAndSetTail(node, pred)) {
+        compareAndSetNext(pred, predNext, null); // 设置尾结点成功后，将尾结点的next指向空
+    } else {
+        
+        int ws;
+        if (pred != head && // 传入节点的上一级节点不是head
+            ((ws = pred.waitStatus) == Node.SIGNAL || // 上一级节点的状态为-1
+             // 节点状态不为取消，且将上一级节点的waitStatus装填修改为-1成功
+             (ws <= 0 && compareAndSetWaitStatus(pred, ws, Node.SIGNAL))) &&
+            pred.thread != null) { // 上一级节点中储存的线程不为空
+            Node next = node.next;
+            // 传入node的下一级不为空且状态不为取消状态
+            if (next != null && next.waitStatus <= 0)
+                // 将上一级node的next指向传入node的next指向的节点，也就是将传入节点从链表中删除
+                compareAndSetNext(pred, predNext, next);
+        } else { // 传入节点的上一级节点是head时
+            unparkSuccessor(node);
+        }
+
+        node.next = node; // help GC
+    }
+}
+```
+
+传入节点的上一级节点不是头部节点、上一级不为取消状态并且上一级节点中线程不为空，
+
+`unparkSuccessor` 方法：
+
+```java
+private void unparkSuccessor(Node node) {
+    int ws = node.waitStatus; // 获取传入节点的状态
+    if (ws < 0)
+        // 节点为取消状态时，将节点状态设置为新节点默认状态
+        compareAndSetWaitStatus(node, ws, 0);
+    Node s = node.next; // 获取到下一级节点
+    // 当下一级节点为空或者状态为取消时
+    if (s == null || s.waitStatus > 0) {
+        s = null;
+        // 初始变量：t为尾结点；循环条件：t不为空且不为当前传入节点；结束操作：将t指定为当前遍历节点的上一个节点
+        for (Node t = tail; t != null && t != node; t = t.prev)
+            if (t.waitStatus <= 0) // 如果遍历节点状态不为取消
+                s = t;
+    }
+    if (s != null)
+        // 若传入node的下一级node不为空且状态正常，或者传入node之后有不为空且状态正常的node
+        // 则将这个node中的线程唤醒
+        LockSupport.unpark(s.thread);
+}
+```
+
+**总结 `acquire` 方法** 
+
+1. 使用 `tryAcquire` 尝试获取资源，若获取到直接返回。
+2. 使用 `addWaiter` 方法将当前线程包装为节点加入等待队列中，并标记为独占模式。
+3. 使用 `acquireQueued` 方法使线程进入等待状态，并在唤醒后尝试获取资源，获取到资源后返回线程是否存在中断。
+4. 若存在中断，则使用 `selfInterrupt` 进行中断线程。
+
+> 当线程在等待状态中被中断，线程是不会响应的，只有在 `acquireQueued` 获取到了资源将是否存在中断返回后，才会由 `acquire` 方法中的 `selfInterrupt` 方法执行中断。
+
+流程图：
+
+![image-20220125172503874](photo/47、acquire方法流程图(7).png)
 
 ### ReentrantLock
 
