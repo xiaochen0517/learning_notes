@@ -677,9 +677,7 @@ public class ConditionQueueTestClass extends BasicLogger {
 
 #### 源码详解
 
-##### Node 静态内部类
-
-###### waitStatus属性
+##### waitStatus属性
 
 ```java
 volatile int waitStatus;
@@ -706,7 +704,7 @@ static final int PROPAGATE = -3;
 
 > 负值为节点处于有效状态，正值则表示节点已经取消。
 
-###### Node类中其他属性
+##### Node类中其他属性
 
 ```java
 volatile Node prev; // 上一个node
@@ -718,9 +716,7 @@ volatile Thread thread; // 当前节点储存的线程，实例化Node时传入�
 
 ![image-20220125095028713](photo/45、CLH队列Node图示1(7).png)
 
-##### AbstractQueuedSynchronizer类
-
-###### AQS中的head和tail属性
+##### AQS中的head和tail属性
 
 ```java
 private transient volatile Node head; // 指向线程链表的第一个node
@@ -729,7 +725,7 @@ private transient volatile Node tail; // 指向线程链表的最后一个node
 
 ![image-20220125104832047](photo/46、CLH队列Node图示2(7).png)
 
-###### acquire(int)方法详解
+##### acquire(int)方法详解
 
 ```java
 public final void acquire(int arg) {
@@ -741,7 +737,7 @@ public final void acquire(int arg) {
 
 在独占模式下获取资源，若获取到资源直接返回线程，否则进入等待队列直到获取到资源后为止，整个过程忽略中断的影响。
 
-`tryAcquire` 方法：
+###### tryAcquire方法
 
 
 ```java
@@ -757,7 +753,7 @@ protected boolean tryAcquire(int arg) {
 >
 > 因为独占模式只需要实现 `tryAcquire` `tryRelease` ，共享模式只需要实现 `tryAcquireShared` `tryReleaseShared` ，如果定义为抽象类每个模式都需要去实现另一个模式下的接口，所以为了避免一些不必要的代码所以定义为一个普通类。
 
-`addWaiter` 方法：
+###### addWaiter方法
 
 
 ```java
@@ -779,7 +775,7 @@ private Node addWaiter(Node mode) {
 
 将当前的线程加入等待队列的末尾，并返回当前线程生产的节点。传入的 `mode` 是一个空值，表示当前的模式为独占模式，在此方法中 `Node` 类中的 `nextWaiter` 参数会等于空。
 
-`enq` 方法：
+###### enq方法
 
 ```java
 private Node enq(final Node node) {
@@ -801,7 +797,7 @@ private Node enq(final Node node) {
 
 自旋循环，若 `tail` 指向的尾部为空时，将头和尾都设置为同一个空的 `node` ，若 `tail` 指向的 `node` 不为空，则执行与 `addWaiter` 中添加节点相同的代码进行添加，最后返回当前的 `node` 。
 
-`acquireQueued` 方法：
+###### acquireQueued方法
 
 
 ```java
@@ -836,7 +832,7 @@ final boolean acquireQueued(final Node node, int arg) {
    1. 获取成功，将 `head` 指向此节点，并返回线程是否存在中断。
    2. 获取失败，继续循环执行阻塞，等待唤醒。
 
-`shouldParkAfterFailedAcquire` 方法：
+###### shouldParkAfterFailedAcquire方法
 
 ```java
 private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
@@ -871,7 +867,7 @@ private final boolean parkAndCheckInterrupt() {
 
 > 需要注意的是， `Thread.interrupted()` 会清除当前线程的中断标记位，若中断的线程在第一调用时返回 `true` 在第二次调用时则会返回 `false` 。
 
-`cancelAcquire` 方法：
+###### cancelAcquire方法
 
 ```java
 private void cancelAcquire(Node node) {
@@ -914,7 +910,7 @@ private void cancelAcquire(Node node) {
 
 传入节点的上一级节点不是头部节点、上一级不为取消状态并且上一级节点中线程不为空，
 
-`unparkSuccessor` 方法：
+###### unparkSuccessor方法
 
 ```java
 private void unparkSuccessor(Node node) {
@@ -938,7 +934,7 @@ private void unparkSuccessor(Node node) {
 }
 ```
 
-**总结 `acquire` 方法** 
+###### 总结acquire方法
 
 1. 使用 `tryAcquire` 尝试获取资源，若获取到直接返回。
 2. 使用 `addWaiter` 方法将当前线程包装为节点加入等待队列中，并标记为独占模式。
@@ -950,6 +946,197 @@ private void unparkSuccessor(Node node) {
 流程图：
 
 ![image-20220125172503874](photo/47、acquire方法流程图(7).png)
+
+##### release方法
+
+此方法时独占模式下线程释放共享资源的方法，他会释放指定量的资源彻底释放则将 `state=0` ，并唤醒等待队列中的其他线程来获取资源。
+
+```java
+public final boolean release(int arg) {
+    if (tryRelease(arg)) {
+        Node h = head;
+        if (h != null && h.waitStatus != 0)
+            unparkSuccessor(h);
+        return true;
+    }
+    return false;
+}
+```
+
+> 此方法是使用返回来确定该线程是否已经完成对资源的释放。
+
+###### tryRelease方法
+
+尝试释放资源，需要自定义同步器来实现，一般情况下此线程都会成功释放资源，因为在执行 `release` 方法时线程已经获取到了资源。
+
+```java
+protected boolean tryRelease(int arg) {
+    throw new UnsupportedOperationException();
+}
+```
+
+
+
+###### unparkSuccessor方法
+
+
+
+```java
+private void unparkSuccessor(Node node) {
+    int ws = node.waitStatus; // 获取当前节点状态
+    if (ws < 0) // 状态不为取消和新创建
+        compareAndSetWaitStatus(node, ws, 0); // 将节点状态设置为新创建
+
+    Node s = node.next; // 获取下一级节点
+    if (s == null || s.waitStatus > 0) { // 节点为空或状态为已取消时
+        s = null; //将当前节点置空
+        // 从后向前查找不为空且不可为当前节点的节点
+        for (Node t = tail; t != null && t != node; t = t.prev)
+            if (t.waitStatus <= 0) // 状态不为已取消时
+                s = t;
+    }
+    if (s != null) // 当获取到当前节点之后的节点不为空时
+        LockSupport.unpark(s.thread); // 将线程恢复运行
+}
+```
+
+在此方法正常执行后，唤醒的节点就会继续执行 [acquireQueued方法](# acquireQueued方法) ，此时当唤醒的线程是队列中的第二个线程时，`acquireQueued` 方法中的获取资源和将唤醒的节点置为 `head` 的操作就会执行。若是从后到前查找并唤醒的节点不为当前队列的第二个节点时，唤醒的线程就会在 `parkAndCheckInterrupt` 方法处继续阻塞。
+
+##### acquireShared(int)方法
+
+
+
+```java
+public final void acquireShared(int arg) {
+    if (tryAcquireShared(arg) < 0)
+        doAcquireShared(arg);
+}
+```
+
+
+
+###### tryAcquireShared方法
+
+
+
+```java
+protected int tryAcquireShared(int arg) {
+    throw new UnsupportedOperationException();
+}
+```
+
+
+
+###### doAcquireShared方法
+
+
+
+```java
+private void doAcquireShared(int arg) {
+    final Node node = addWaiter(Node.SHARED);
+    boolean failed = true;
+    try {
+        boolean interrupted = false;
+        for (;;) {
+            final Node p = node.predecessor();
+            if (p == head) {
+                int r = tryAcquireShared(arg);
+                if (r >= 0) {
+                    setHeadAndPropagate(node, r);
+                    p.next = null; // help GC
+                    if (interrupted)
+                        selfInterrupt();
+                    failed = false;
+                    return;
+                }
+            }
+            if (shouldParkAfterFailedAcquire(p, node) &&
+                parkAndCheckInterrupt())
+                interrupted = true;
+        }
+    } finally {
+        if (failed)
+            cancelAcquire(node);
+    }
+}
+```
+
+
+
+###### setHeadAndPropagate方法
+
+
+
+```java
+private void setHeadAndPropagate(Node node, int propagate) {
+    Node h = head; // Record old head for check below
+    setHead(node);
+    /*
+     * Try to signal next queued node if:
+     *   Propagation was indicated by caller,
+     *     or was recorded (as h.waitStatus either before
+     *     or after setHead) by a previous operation
+     *     (note: this uses sign-check of waitStatus because
+     *      PROPAGATE status may transition to SIGNAL.)
+     * and
+     *   The next node is waiting in shared mode,
+     *     or we don't know, because it appears null
+     *
+     * The conservatism in both of these checks may cause
+     * unnecessary wake-ups, but only when there are multiple
+     * racing acquires/releases, so most need signals now or soon
+     * anyway.
+     */
+    if (propagate > 0 || h == null || h.waitStatus < 0 ||
+        (h = head) == null || h.waitStatus < 0) {
+        Node s = node.next;
+        if (s == null || s.isShared())
+            doReleaseShared();
+    }
+}
+```
+
+
+
+###### doReleaseShared方法
+
+
+
+```java
+private void doReleaseShared() {
+    /*
+     * Ensure that a release propagates, even if there are other
+     * in-progress acquires/releases.  This proceeds in the usual
+     * way of trying to unparkSuccessor of head if it needs
+     * signal. But if it does not, status is set to PROPAGATE to
+     * ensure that upon release, propagation continues.
+     * Additionally, we must loop in case a new node is added
+     * while we are doing this. Also, unlike other uses of
+     * unparkSuccessor, we need to know if CAS to reset status
+     * fails, if so rechecking.
+     */
+    for (;;) {
+        Node h = head;
+        if (h != null && h != tail) {
+            int ws = h.waitStatus;
+            if (ws == Node.SIGNAL) {
+                if (!compareAndSetWaitStatus(h, Node.SIGNAL, 0))
+                    continue;            // loop to recheck cases
+                unparkSuccessor(h);
+            }
+            else if (ws == 0 &&
+                     !compareAndSetWaitStatus(h, 0, Node.PROPAGATE))
+                continue;                // loop on failed CAS
+        }
+        if (h == head)                   // loop if head changed
+            break;
+    }
+}
+```
+
+
+
+
 
 ### ReentrantLock
 
@@ -1044,7 +1231,7 @@ public LinkedBlockingQueue(int capacity) {
 
 单项链表（`LinkedBlockingQueue` 静态内部类）：
 
-```
+```java
 static class Node<E> {
     E item;
     Node<E> next;
