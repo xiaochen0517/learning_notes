@@ -874,7 +874,7 @@ private void cancelAcquire(Node node) {
     if (node == null) // 忽略空值
         return;
 
-    node.thread = null; // 将节点中储存的线程置空
+    node.thread = null; // 将节点中储存的线程置空 help GC
 
     Node pred = node.prev;
     while (pred.waitStatus > 0) // 删除已经成为取消状态的上级节点
@@ -908,7 +908,7 @@ private void cancelAcquire(Node node) {
 }
 ```
 
-传入节点的上一级节点不是头部节点、上一级不为取消状态并且上一级节点中线程不为空，
+此方法用于取消删除自旋锁非正常结束且没有正常获取到资源的节点，并清除传入节点之前所有为已取消状态的节点。
 
 ###### unparkSuccessor方法
 
@@ -975,11 +975,7 @@ protected boolean tryRelease(int arg) {
 }
 ```
 
-
-
 ###### unparkSuccessor方法
-
-
 
 ```java
 private void unparkSuccessor(Node node) {
@@ -1004,20 +1000,20 @@ private void unparkSuccessor(Node node) {
 
 ##### acquireShared(int)方法
 
-
+`acquireShared` 方法和独享模式的 `acquire` 方法流程基本相同，唯一不同的是当前资源已经被之前线程使用一部分后剩下的资源依旧足够下一个线程使用，则会唤醒下一个线程。这也是独享模式和共享模式最大个区别，独享模式同时只有 `head` 的线程在运行，而共享模式可能会同时运行多个线程。
 
 ```java
 public final void acquireShared(int arg) {
-    if (tryAcquireShared(arg) < 0)
-        doAcquireShared(arg);
+    if (tryAcquireShared(arg) < 0) // 获取资源
+        doAcquireShared(arg); // 添加到等待队列
 }
 ```
 
-
+第一步依旧是尝试获取资源，不过与独显模式不同的是 `tryAcquireShared` 方法返回的是一个 `int` 值。负数表示获取资源失败，0表示获取成功但是没有多余的资源，正数表示获取成功并且有剩余的资源其他线程还可以获取资源。第二步则是线程获取资源失败后将线程加入等待队列。
 
 ###### tryAcquireShared方法
 
-
+以共享模式获取资源的方法依旧是需要自定义同步器去实现。
 
 ```java
 protected int tryAcquireShared(int arg) {
@@ -1025,74 +1021,76 @@ protected int tryAcquireShared(int arg) {
 }
 ```
 
-
-
 ###### doAcquireShared方法
 
-
+此方法用于等待和被唤醒后获取资源。
 
 ```java
 private void doAcquireShared(int arg) {
-    final Node node = addWaiter(Node.SHARED);
+    final Node node = addWaiter(Node.SHARED); // 将线程包装为node添加到队尾
     boolean failed = true;
     try {
         boolean interrupted = false;
-        for (;;) {
-            final Node p = node.predecessor();
-            if (p == head) {
-                int r = tryAcquireShared(arg);
-                if (r >= 0) {
-                    setHeadAndPropagate(node, r);
+        for (;;) { // 自旋
+            final Node p = node.predecessor(); // 获取当前node上一个node
+            if (p == head) { // 上一级node是否为head
+                int r = tryAcquireShared(arg); // 如果当前node为第二个node则尝试获取资源
+                if (r >= 0) { // 若获取成功
+                    setHeadAndPropagate(node, r); // 将当前node设置为head
                     p.next = null; // help GC
-                    if (interrupted)
-                        selfInterrupt();
+                    if (interrupted) // 如果存在中断
+                        selfInterrupt(); // 中断线程
                     failed = false;
                     return;
                 }
             }
+            // 此方法内容参见上方解释，删除当前node前失效node
             if (shouldParkAfterFailedAcquire(p, node) &&
+                // 阻塞并返回是否有中断
                 parkAndCheckInterrupt())
                 interrupted = true;
         }
     } finally {
-        if (failed)
-            cancelAcquire(node);
+        if (failed) // 非正常结束
+            cancelAcquire(node); // 删除当前及之前的无效节点
+    }
+}
+```
+
+使用自旋保证每一次被唤醒后都检查节点状态，当节点为第二个节点时尝试去获取资源，若不满足条件会清除无效节点继续进入阻塞等待状态以便下一次唤醒，当自旋时非正常结束且没有正常获取到资源时，则会将本节点及之前的无效节点全部删除。
+
+###### setHeadAndPropagate方法
+
+此方法用于设置head指向的节点，在资源还有剩余时唤醒下一个节点
+
+```java
+private void setHeadAndPropagate(Node node, int propagate) {
+    Node h = head; // 获取head
+    setHead(node); // 将head指向当前节点，且将thread和prev置空
+    // 剩余资源数大于0 或 head不为空 或 head状态不为新建和取消
+    if (propagate > 0 || h == null || h.waitStatus < 0 ||
+        (h = head) == null || h.waitStatus < 0) {
+        Node s = node.next; // 获取到当前节点的下一级节点
+        // 下一级节点为空或节点为共享模式
+        if (s == null || s.isShared())
+            doReleaseShared(); // 继续唤醒下一级节点
     }
 }
 ```
 
 
 
-###### setHeadAndPropagate方法
+##### releaseShared方法
 
 
 
 ```java
-private void setHeadAndPropagate(Node node, int propagate) {
-    Node h = head; // Record old head for check below
-    setHead(node);
-    /*
-     * Try to signal next queued node if:
-     *   Propagation was indicated by caller,
-     *     or was recorded (as h.waitStatus either before
-     *     or after setHead) by a previous operation
-     *     (note: this uses sign-check of waitStatus because
-     *      PROPAGATE status may transition to SIGNAL.)
-     * and
-     *   The next node is waiting in shared mode,
-     *     or we don't know, because it appears null
-     *
-     * The conservatism in both of these checks may cause
-     * unnecessary wake-ups, but only when there are multiple
-     * racing acquires/releases, so most need signals now or soon
-     * anyway.
-     */
-    if (propagate > 0 || h == null || h.waitStatus < 0 ||
-        (h = head) == null || h.waitStatus < 0) {
-        Node s = node.next;
-        if (s == null || s.isShared())
-            doReleaseShared();
+public final boolean releaseShared(int arg) {
+    if (tryReleaseShared(arg)) {
+        doReleaseShared();
+        return true;
     }
+    return false;
 }
 ```
 
@@ -1103,31 +1101,23 @@ private void setHeadAndPropagate(Node node, int propagate) {
 
 
 ```java
-private void doReleaseShared() {
-    /*
-     * Ensure that a release propagates, even if there are other
-     * in-progress acquires/releases.  This proceeds in the usual
-     * way of trying to unparkSuccessor of head if it needs
-     * signal. But if it does not, status is set to PROPAGATE to
-     * ensure that upon release, propagation continues.
-     * Additionally, we must loop in case a new node is added
-     * while we are doing this. Also, unlike other uses of
-     * unparkSuccessor, we need to know if CAS to reset status
-     * fails, if so rechecking.
-     */
+private void doReleaseShared() {	
     for (;;) {
-        Node h = head;
+        Node h = head; // 获取head
+        // head不为空且不为队尾，即队列中不是只有一个节点
         if (h != null && h != tail) {
-            int ws = h.waitStatus;
-            if (ws == Node.SIGNAL) {
+            int ws = h.waitStatus; // 获取头部状态
+            if (ws == Node.SIGNAL) { // 当head状态为SIGNAL -1
+                // 将状态从SIGNAL替换为新建状态 0
                 if (!compareAndSetWaitStatus(h, Node.SIGNAL, 0))
                     continue;            // loop to recheck cases
-                unparkSuccessor(h);
+                unparkSuccessor(h); // 替换成功，唤醒队列中head后面的线程
             }
-            else if (ws == 0 &&
-                     !compareAndSetWaitStatus(h, 0, Node.PROPAGATE))
+            // head状态为新建，且将head状态从0替换到PROPAGATE时失败，continue重启循环
+            else if (ws == 0 && !compareAndSetWaitStatus(h, 0, Node.PROPAGATE))
                 continue;                // loop on failed CAS
         }
+        // 若head未变化则中断循环
         if (h == head)                   // loop if head changed
             break;
     }
@@ -1135,6 +1125,29 @@ private void doReleaseShared() {
 ```
 
 
+
+###### unparkSuccessor方法
+
+
+
+```java
+private void unparkSuccessor(Node node) {
+
+    int ws = node.waitStatus;
+    if (ws < 0)
+        compareAndSetWaitStatus(node, ws, 0);
+
+    Node s = node.next;
+    if (s == null || s.waitStatus > 0) {
+        s = null;
+        for (Node t = tail; t != null && t != node; t = t.prev)
+            if (t.waitStatus <= 0)
+                s = t;
+    }
+    if (s != null)
+        LockSupport.unpark(s.thread);
+}
+```
 
 
 
