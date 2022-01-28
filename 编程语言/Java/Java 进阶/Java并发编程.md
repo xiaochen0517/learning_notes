@@ -32,7 +32,9 @@
 
 > 线程解决了多任务同时执行的问题（例如边打游戏边听歌），当然线程也是一种受限的系统资源，系统不可能无限制的创建线程。当线程在创建和销毁时都会有相应的开销，为了解决线程频繁的创建和销毁带来的性能问题通常会采用线程池技术，即在线程池总会缓存一定数量的线程，通过这种方法来避免线程的频繁创建和销毁带来的性能问题。
 
-#### Java 中的线程
+## Java 中的多线程
+
+### 主线程
 
 我们在编写 `Java` 程序时首先要编写一个 `main` 方法，而这个方法会在当前运行的 `Java` 进程的主线程中执行，可以使用以下的代码获取到当前执行的线程名称。
 
@@ -44,97 +46,17 @@ public static void main(String[] args) {
 
 当程序需要进行一些需要耗费大量时间进行的操作时（例如网络请求、 `I/O` 操作等），当这些操作依旧直接在主线程中执行时就会使主线程停止运行，直到操作完成程序才会继续运行，于是就需要多线程来执行这些操作防止主线程阻塞，将耗时操作放到子线程中执行。
 
-### 多线程基础类介绍
+### 线程状态
 
-在Java中最重要的三个和线程相关的类是 `Thread` `Runnable` `Callable` ，其中 `Thread` 是真正创建和运行线程的类而其余两个只是接口，用于向 `Thread` 类中传入对象引用用于执行方法的。以下源代码中可以看到 `Runnable` 和 `Callable` 类并没有实质性的方法，真正创建线程和执行的是 `Thread` 类。Thread 类是线程类而 `Runnable` 和 `Callable` 是任务类，任务类只是将需要执行的任务进行封装后传入线程类来真正执行。
+#### 状态转换图
 
-![image-20220120091319719](photo\33、Runnable源码(7).png) 
+![image-20220128173943816](photo\42、Thread生命周期转换图(7).png) 
 
-![image-20220120091409143](photo\34、Callable源码(7).png) 
+主要方法介绍 [Thread类主要方法](# Thread 类) 
 
-![image-20220120091519767](photo\35、Thread源码(7).png) 
+#### 代码实现
 
-#### Thread 类
-
-在 `Thread` 类中，真正创建线程和执行的方法是本地方法 `start0` 
-
-```java
-private native void start0();
-```
-
-类中有一个名为 `target` 的变量，此变量就是需要执行的 `Runnable` 对象，而这个参数会在 `Thread` 类实例化时传入或者赋值为空。
-
-```java
-/* What will be run. */
-private Runnable target;
-```
-
-真正在线程中执行的代码是 `run` 方法中的代码，`Thread` 实现了 `Runnable` 接口同样也实现了 `run` 方法，以下是 `Thread` 类中实现的 `run` 方法的源代码。
-
-```java
-@Override
-public void run() {
-    if (target != null) {
-        target.run();
-    }
-}
-```
-
-在执行线程时判断是否有传入指定的 `Runnable` 对象，若存在则执行传入对象的 `run` 方法，否则直接结束。
-
-`Thread` 状态
-
-在 `java` 中 `Thread` 类有以下几种状态。
-
-- `NEW` ：初始状态
-- `RUNNABLE` ：运行状态
-- `BLOCKED` ：阻塞状态
-- `WAITING` ：等待状态
-- `TIMED_WAITING` ：有超时的等待状态
-- `TERMINATED` ：结束状态
-
-
-
-#### Callable 类
-
-`Callable` 类和 `Runnable` 类一样是一个接口类，不同之处在于 `Callable` 的 `call` 方法拥有返回值，而 `Runnable` 的 `run` 方法没有返回值。
-
-## Java 中的多线程
-
-### 使用 Thread 类创建线程
-
-```java
-Thread thread = new Thread() {
-    @Override
-    public void run() {
-        System.out.println("new thread with rewrite run method");
-    }
-};
-thread.start();
-```
-
-此方法使用匿名内部类来继承 `Thread` 并重写其中的 `run` 方法，因为 `Thread` 是实现 `Runnable` 接口类，所以重写 `run` 方法后，使用 `start` 方法启动线程依旧可以实现相同的效果。
-
-### 使用 Runnable 传入 Thread 
-
-```java
-new Thread(new Runnable(){
-    @Override
-    public void run() {
-        System.out.println("new Thread with runnable");
-    }
-}).start();
-// lambda 简写
-new Thread(() -> {
-    System.out.println("new Thread with runnable");
-}).start();
-```
-
-最普通的写法，使用 匿名内部类实例化 `Runnable` 接口，并将实例化的对象引用传入 `Thread` 对象中，最后调用 `start` 方法启动线程。
-
-#### 线程状态
-
-- `NEW` ：初始状态
+##### NEW：初始状态
 
 ```java
 Thread thread1 = new Thread(() -> {
@@ -145,7 +67,7 @@ LOGGER.info("线程状态：{}", thread1.getState()); // NEW
 
 当 `Thread` 对象不为空时，线程当前的状态为初始化状态。
 
-- `RUNNABLE` ：可运行状态
+##### RUNNABLE：可运行状态
 
 ```java
 Thread thread1 = new Thread(() -> {
@@ -157,7 +79,7 @@ LOGGER.info("线程状态：{}", thread1.getState()); // RUNNABLE
 
 当执行 `start()` 方法时线程为可运行状态。
 
-- `BLOCKED` ：阻塞状态
+##### BLOCKED：阻塞状态
 
 ```java
 final int[] i = {0};
@@ -182,7 +104,7 @@ LOGGER.info("线程状态：{}", thread4.getState()); // BLOCKED
 
 当线程在等待同步锁时，为阻塞状态。
 
-- `WAITING` ：等待状态
+##### WAITING：等待状态
 
 ```java
 Thread thread2 = new Thread(() -> {
@@ -203,7 +125,7 @@ public synchronized void waitRun() throws InterruptedException {
 
 执行 `wait()` 方法后，线程进入等待状态。
 
-- `TIMED_WAITING` ：有超时的等待状态
+##### TIMED_WAITING：有超时的等待状态
 
 ```java
 Thread thread3 = new Thread(() -> {
@@ -220,7 +142,7 @@ LOGGER.info("线程状态：{}", thread3.getState()); // TIMED_WAITING
 
 进入超时等待状态有两种方法，一种是使用 `sleep` 方法，另一种是使用 `wait(long time)` 方法。
 
-- `TERMINATED` ：结束状态
+##### TERMINATED：结束状态
 
 ```java
 Thread thread5 = new Thread(() -> {});
@@ -231,11 +153,178 @@ LOGGER.info("线程状态：{}", thread5.getState()); // TERMINATED
 
 正常执行完成的线程进入结束状态。
 
-#### 状态转换图
 
-![image-20220121154348812](photo\42、Thread生命周期转换图(7).png)
+### 使用多线程
 
-### 使用线程池和 Callable
+在Java中最重要的三个和线程相关的类是 `Thread` `Runnable` `Callable` ，其中 `Thread` 是真正创建和运行线程的类而其余两个只是接口，用于向 `Thread` 类中传入对象引用用于执行方法的。以下源代码中可以看到 `Runnable` 和 `Callable` 类并没有实质性的方法，真正创建线程和执行的是 `Thread` 类。Thread 类是线程类而 `Runnable` 和 `Callable` 是任务类，任务类只是将需要执行的任务进行封装后传入线程类来真正执行。
+
+`Runnable` 类：
+
+```java
+@FunctionalInterface
+public interface Runnable {
+    public abstract void run();
+}
+```
+
+`Callable` 类：
+
+```java
+@FunctionalInterface
+public interface Callable<V> {
+    V call() throws Exception;
+}
+```
+
+`Thread` 类：
+
+```java
+public class Thread implements Runnable {
+    // code
+}
+```
+
+### 源码解析
+
+#### Thread 类
+
+在 `Thread` 类中，真正创建线程和执行的方法是本地方法 `start0` 
+
+```java
+private native void start0();
+```
+
+类中有一个名为 `target` 的变量，此变量就是需要执行的 `Runnable` 对象，而这个参数会在 `Thread` 类实例化时传入或者赋值为空。
+
+```java
+/* What will be run. */
+private Runnable target;
+```
+
+##### run方法
+
+真正在线程中执行的代码是 `run` 方法中的代码，`Thread` 实现了 `Runnable` 接口同样也实现了 `run` 方法，以下是 `Thread` 类中实现的 `run` 方法的源代码。
+
+```java
+@Override
+public void run() {
+    if (target != null) {
+        target.run();
+    }
+}
+```
+
+在执行线程时判断是否有传入指定的 `Runnable` 对象，若存在则执行传入对象的 `run` 方法，否则直接结束。
+
+`Thread` 类中的 `run` 方法调用是由 `start` 方法启动之后，当线程获取到 `CPU` 执行时间时会自动调用。
+
+##### start方法
+
+`start` 方法作用是将线程从可运行状态转换为可运行状态，内部调用了一个 `native` 方法用于初始化线程。
+
+```java
+public synchronized void start() {
+
+    if (threadStatus != 0) // 如果当前线程的状态不是新建状态，则抛出错误
+        throw new IllegalThreadStateException();
+
+    group.add(this); // 将此Thread添加到ThreadGroup中
+
+    boolean started = false; // 是否成功启动
+    try {
+        start0(); // native方法
+        started = true; // 启动成功
+    } finally {
+        try {
+            if (!started) { // 如果启动失败
+                group.threadStartFailed(this); // 将当前Thread标记为启动失败
+            }
+        } catch (Throwable ignore) {
+            /* do nothing. If start0 threw a Throwable then
+              it will be passed up the call stack */
+            /* 什么也不做。如果start0抛出一个Throwable，
+            	那么它将被向上传递到调用堆栈 */
+        }
+    }
+}
+```
+
+方法会判断需要启动线程的状态，不为新建状态则直接抛出错误，不进行启动操作。
+
+##### sleep方法
+
+`sleep` 方法有两个重载方法，启动 `sleep(time)` 是 `native` 方法，`sleep(millis, nanos)` 最终将参数处理后也是交给 `sleep(time)`  来执行。
+
+```java
+public static native void sleep(long millis) throws InterruptedException;
+
+public static void sleep(long millis, int nanos) throws InterruptedException {
+    if (millis < 0) { // 毫秒不可小于0
+        throw new IllegalArgumentException("timeout value is negative");
+    }
+
+    if (nanos < 0 || nanos > 999999) { // 纳秒不可小于0大于999999
+        throw new IllegalArgumentException(
+            "nanosecond timeout value out of range");
+    }
+
+    // 当纳秒大于50万或者纳秒大于0且毫秒为0
+    if (nanos >= 500000 || (nanos != 0 && millis == 0)) {
+        millis++; // 将毫秒加一
+    }
+    sleep(millis);
+}
+```
+
+`sleep` 方法作用就是将线程睡眠，空出 `CPU` 执行时间用于执行其他线程。从第二个重载方法源码中可以看出，本质上 `sleep` 只能以毫秒为单位进行睡眠，`nanos` 参数并没有实际的效果。
+
+> 注意：`sleep` 方法不会释放锁，若当前线程拥有一个对象的锁进入 `sleep` 状态时，其他需要这个对象锁的线程依旧无法拿到锁。
+
+##### yield方法
+
+`yield` 方法是一个 `native` 方法，作用和 `sleep` 方法相同都是空出 `CPU` 执行时间用于执行其他线程，同样， `yield` 方法也不会释放锁。唯一与 `sleep` 方法不同的是 `yield` 方法无法控制空出的时间，并且 `yield` 方法只能让拥有同样优先级的线程有获取 `CPU` 执行时间的机会。
+
+> 注意：此方法不会将线程进入阻塞状态，只会将线程重新置为可运行状态 `RUNNABLE` 。
+
+#### Callable 类
+
+`Callable` 类和 `Runnable` 类一样是一个接口类，不同之处在于 `Callable` 的 `call` 方法拥有返回值，而 `Runnable` 的 `run` 方法没有返回值。
+
+#### 代码实例
+
+##### 使用 Thread 类创建线程
+
+```java
+Thread thread = new Thread() {
+    @Override
+    public void run() {
+        System.out.println("new thread with rewrite run method");
+    }
+};
+thread.start();
+```
+
+此方法使用匿名内部类来继承 `Thread` 并重写其中的 `run` 方法，因为 `Thread` 是实现 `Runnable` 接口类，所以重写 `run` 方法后，使用 `start` 方法启动线程依旧可以实现相同的效果。
+
+##### 使用 Runnable 传入 Thread 
+
+```java
+new Thread(new Runnable(){
+    @Override
+    public void run() {
+        System.out.println("new Thread with runnable");
+    }
+}).start();
+// lambda 简写
+new Thread(() -> {
+    System.out.println("new Thread with runnable");
+}).start();
+```
+
+最普通的写法，使用 匿名内部类实例化 `Runnable` 接口，并将实例化的对象引用传入 `Thread` 对象中，最后调用 `start` 方法启动线程。
+
+
+##### 使用线程池和 Callable
 
 ```java
 ExecutorService service = Executors.newSingleThreadExecutor();
@@ -254,412 +343,11 @@ service.shutdown();
 
 `Callable` 和 `Runnable` 是不同的，而 `Thread` 中是无法传入 `Callable` 对象的，这时就需要用到一个新技术线程池，使用 `Executors` 新建一个线程池，最后使用线程池的 `submit` 方法传入 `Callable` 对象进行线程的创建和执行。关于线程池相关请查看[Java线程池](#线程池) 
 
-## FutureTask
-
-### FutureTask 是什么
-
-要了解 `FutureTask` 是什么首先要了解这个类是为了解决什么问题，现在有一个场景，我们需要请求一个接口而这个网络请求是耗时操作，我们需要用到多线程技术，在请求发出后的一段时间之内我们需要在主线程中知道这个接口是否返回了数据，是否成功等情况。这时就需要用到 `FutureTask` 来实现这个需求，在此类中有很多方法可以让我们获取到线程的状态以及去操作线程。
-
-![image-20220120101305193](photo\36、FutureTask方法列表(7).png)
-
-### 使用 FutureTask
-
-```java
-public static void main(String[] args) throws ExecutionException, InterruptedException, TimeoutException {
-    FutureTask<String> futureTask = new FutureTask<>(new Callable<String>() {
-        @Override
-        public String call() throws Exception {
-            LOGGER.info("start thread");
-            Thread.sleep(2000L);
-            return "This is result data";
-        }
-    });
-    new Thread(futureTask).start();
-    LOGGER.info("Mission Is Done : {}", futureTask.isDone());
-    String result = futureTask.get();
-    // String result = futureTask.get(1, TimeUnit.SECONDS); // 在指定的时间超时后会抛出 TimeoutException
-    LOGGER.info("Mission Is Done : {}", futureTask.isDone());
-    LOGGER.info("Result Data : {}", result);
-}
-```
-
-- 在实例化 `FutureTask` 时传入 `Callable` 对象
-- 将 `FutureTask` 对象传入 Thread 并执行线程
-- 使用 `isDone` 方法检查是否执行完成
-- 使用 `get` 方法获取到返回的内容
-
-> `get` 方法有两个重载方法，一个无参数另一个需要传入超时时间，超时后抛出 `TimeoutException` 异常。
->
-> 在执行 `get` 方法时，主线程会被阻塞，知道获取到返回结果或者超时。
-
-### 解析源码
-
-#### 实例化 FutureTask
-
-`FutureTask` 拥有两个构造方法，一个直接传入 `Callable` 对象，另一个传入 `Runnable` 对象和一个默认的返回值，因为 `FutureTask` 类默认是存在可以获取返回值的。
-
-```java
-public FutureTask(Callable<V> callable) {
-    if (callable == null)
-        throw new NullPointerException();
-    this.callable = callable;
-    this.state = NEW;       // ensure visibility of callable
-}
-
-public FutureTask(Runnable runnable, V result) {
-    this.callable = Executors.callable(runnable, result);
-    this.state = NEW;       // ensure visibility of callable
-}
-```
-
-在当传入的对象是 `Callable` 时，`FutureTask` 会直接将 `Callable` 赋值给属性。当传入的 `Runnable` 时会使用到线程池对象 `Executors` 的 `callable` 方法，将 `Runnable` 转换为 `Callable`。
-
-```java
-public static <T> Callable<T> callable(Runnable task, T result) {
-    if (task == null)
-        throw new NullPointerException();
-    return new RunnableAdapter<T>(task, result);
-}
-
-// RunnableAdapter
-static final class RunnableAdapter<T> implements Callable<T> {
-    final Runnable task;
-    final T result;
-    RunnableAdapter(Runnable task, T result) {
-        this.task = task;
-        this.result = result;
-    }
-    public T call() {
-        task.run();
-        return result;
-    }
-}
-```
-
-可以看到，`Runnable` 和 传入的返回值被传入到 `RunnableAdapter` 对象中，此对象实现 `Callable` 接口并在 `call` 方法中调用了 `Runnable` 的 `run` 方法，并将传入的返回值进行返回。至此，使用传入的 `Runnable` 对象和默认返回值转换为 `Callable` 对象。
-
-#### 传入到 Thread
-
-从下图可知，`FutureTask` 实现了 `RunnableFuture` 而 `RunnableFuture` 接口类继承了 `Runnable` 和 `Future` ，因此 `FutureTask` 本质上还是 `Runnable` ，所以可以直接传入 `Thread` 类中。
-
-![image-20220120112001460](photo\37、FutureTask继承结构图(7).png) 
-
-在 `FutureTask` 中的 `run` 方法最后还是执行的是 `Callable` 的 `call` 方法。
-
-#### FutureTask 如何包装 Runnable 和 Callable
-
-![image-20220120170609195](photo\38、FutureTask包装任务类(7).png) 
-
-#### get 方法
-
-`FutureTask` 使用以下状态用来区分当前线程的状态
-
-![image-20220120171941083](photo\39、FutureTask状态(7).png) 
-
-- `NEW` ：新建
-- `COMPLETING` ：即将完成
-- `NORMAL` ：完成
-- `EXECEPTIONAL` ：抛异常
-- `CANCELLED` ：任务取消
-- `INTERRRUPTING` ：任务即将被打断
-- `INTERRUPTED` ：任务被打断
-
-`get` 方法源码
-
-![图片](photo\40、FutureTask_get()源码(7).png) 
-
-`get` 方法会阻塞线程等待返回，阻塞部分的核心代码就是 `awaitDone` 方法。
-
-![image-20220121091414977](photo/41、FutureTask_awaitDone()源码(7).png) 
-
-关于阻塞部分，方法中使用了 `LockSupport` 这是一个阻塞线程工具类，提供了多种方法用来阻塞及唤醒线程。
-
-```java
-public static void park(Object blocker); // 暂停当前线程
-public static void parkNanos(Object blocker, long nanos); // 暂停当前线程，不过有超时时间的限制
-public static void parkUntil(Object blocker, long deadline); // 暂停当前线程，直到某个时间
-public static void park(); // 无期限暂停当前线程
-public static void parkNanos(long nanos); // 暂停当前线程，不过有超时时间的限制
-public static void parkUntil(long deadline); // 暂停当前线程，直到某个时间
-public static void unpark(Thread thread); // 恢复当前线程
-public static Object getBlocker(Thread t);
-```
-
-#### LockSupport 简单使用
-
-使用 `LockSupport` 阻塞线程后唤醒。
-
-```java
-public static void main(String[] args) throws InterruptedException {
-    List<Thread> threadList = new ArrayList<>();
-
-    for (int i = 0; i < 5; i ++){
-        int finalI = i;
-        Thread thread = new Thread(() -> {
-            LOGGER.info("启动线程：{}", finalI);
-            LockSupport.park();
-            LOGGER.info("线程恢复：{}", finalI);
-        });
-        thread.setName("线程--"+finalI);
-        thread.start();
-        threadList.add(thread);
-    }
-
-    Thread.sleep(2000L);
-    LOGGER.info("主线程恢复");
-    for (Thread thread : threadList) {
-        LockSupport.unpark(thread);
-    }
-}
-```
-
-结果
-
-```java
-2022-01-21 09:43:59.993 [线程--0] INFO  java.lang.Thread - 启动线程：0
-2022-01-21 09:43:59.993 [线程--2] INFO  java.lang.Thread - 启动线程：2
-2022-01-21 09:43:59.993 [线程--1] INFO  java.lang.Thread - 启动线程：1
-2022-01-21 09:43:59.993 [线程--3] INFO  java.lang.Thread - 启动线程：3
-2022-01-21 09:43:59.993 [线程--4] INFO  java.lang.Thread - 启动线程：4
-2022-01-21 09:44:02.007 [main] INFO  java.lang.Thread - 主线程恢复
-2022-01-21 09:44:02.007 [线程--0] INFO  java.lang.Thread - 线程恢复：0
-2022-01-21 09:44:02.007 [线程--4] INFO  java.lang.Thread - 线程恢复：4
-2022-01-21 09:44:02.007 [线程--3] INFO  java.lang.Thread - 线程恢复：3
-2022-01-21 09:44:02.007 [线程--2] INFO  java.lang.Thread - 线程恢复：2
-2022-01-21 09:44:02.007 [线程--1] INFO  java.lang.Thread - 线程恢复：1
-```
-
-## 线程间通信
-
-### 什么是线程间通信
-
-同进程下的线程是可以访问共享数据的，线程间通信的定义为针对同一资源的操作有不同种类的线程。即为多个不同作用的线程操作同一资源，最经典的实例就是生产者消费者。
-
-### 生产者与消费者
-
-生产者消费者顾名思义就是生产产品的对象和消费产品的对象，在消费者消费时发现产品已经没有了，此时就要通知生产者进行生产。反之生产者生产出产品也需要通知消费者进行消费。
-
-#### 代码实现
-
-- 轮询实现
-
-```java
-public class WhileQueueTestClass extends BasicLogger {
-
-    public static void main(String[] args) {
-        // 队列
-        WhileQueue<String> queue = new WhileQueue<>();
-
-        // 生产者
-        new Thread(() -> {
-            for (int i = 0; i < 100; i++) {
-                try {
-                    queue.put("消息" + i);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-        }).start();
-
-        // 消费者
-        new Thread(() -> {
-            for (int i = 0; i < 100; i++) {
-                try {
-                    queue.take();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-        }).start();
-    }
-
-    /**
-     * 轮询版本
-     */
-    public static class WhileQueue<T> {
-        // 容器，用来装东西
-        private final LinkedList<T> queue = new LinkedList<>();
-
-        public void put(T resource) throws InterruptedException {
-            while (queue.size() >= 1) {
-                // 队列满了，不能再塞东西了，轮询等待消费者取出数据
-                System.out.println("生产者：队列已满，无法插入...");
-                TimeUnit.MILLISECONDS.sleep(1000);
-            }
-            System.out.println("生产者：插入" + resource + "!!!");
-            queue.addFirst(resource);
-        }
-
-        public void take() throws InterruptedException {
-            while (queue.size() <= 0) {
-                // 队列空了，不能再取东西，轮询等待生产者插入数据
-                System.out.println("消费者：队列为空，无法取出...");
-                TimeUnit.MILLISECONDS.sleep(1000);
-            }
-            System.out.println("消费者：取出消息!!!");
-            queue.removeLast();
-            TimeUnit.MILLISECONDS.sleep(5000);
-        }
-
-    }
-}
-```
-
-轮询状态线程并没有处于等待或休眠状态，而是一直处于运行状态，因此这种方法会极大程度的消耗性能，造成很多无所谓的消耗。
-
-- 等待唤醒 `wait/notify` 
-
-使用 `wait` 方法可以使线程进入等待状态，使用 `notify` 随机唤醒一个等待中的线程，使用 `notifyAll` 唤醒所有等待中的线程。
-
-```java
-public class ThreadQueueTestClass {
-
-    public static void main(String[] args) {
-        // 队列
-        WaitNotifyQueue<String> queue = new WaitNotifyQueue<>();
-
-        // 生产者
-        new Thread(() -> {
-            for (int i = 0; i < 100; i++) {
-                try {
-                    queue.put("消息" + i);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-        }, "生产者--1").start();
-
-        // 消费者
-        new Thread(() -> {
-            for (int i = 0; i < 100; i++) {
-                try {
-                    queue.take();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-        }, "消费者--1").start();
-
-    }
-
-    public static class WaitNotifyQueue<T> extends BasicLogger {
-        // 容器队列，用于放置生产的产品
-        private final LinkedList<T> queue = new LinkedList<>();
-
-        public synchronized void put(T resource) throws InterruptedException {
-            while (queue.size() >= 1) {
-                // 队列中已经存在内容
-                LOGGER.info("生产者：队列已满，无法继续");
-                this.wait();
-            }
-            LOGGER.info("生产者：生产 {} ", resource);
-            queue.addFirst(resource);
-            this.notifyAll();
-        }
-
-        public synchronized void take() throws InterruptedException {
-            while (queue.size() <= 0) {
-                // 队列无内容
-                LOGGER.info("消费者：队列为空，无法继续");
-                this.wait();
-            }
-            LOGGER.info("消费者：使用产品");
-            queue.removeLast();
-            this.notifyAll();
-        }
-    }
-}
-```
-
-> - 为什么使用 `notifyAll` 
->
->   - 当使用的方法为 `notify` 时，此方法会随机唤醒一个线程，当生产者线程为多个时，有可能因为两次唤醒的都是生产者线程导致程序阻塞。
->
-> - 为什么 `LinkedList` 是 `final` 状态
->
->   - 因为两个方法执行时是不同的线程，在子线程中只可以访问常量，所以需要使用 `final` 修饰。
->
-> - 为什么方法中需要使用 `syncronized` 同步锁
->
->   - 因为 ` queue` 是生产者线程和消费者线程都需要操作的对象，所以需要保证此对象的原子性，即此对象不可以同时被多个线程修改，所以需要方法上添加 `syncronized` 同步锁，保证同一时间只有一个线程在修改此对象。
->
-> 注：线程在执行 `wait` 方法后进入 `WAITING` 状态，此状态必须使用 `notify` 唤醒之后才可以继续执行，否则将会一直处于 `WAITING` 状态导致程序阻塞，这也是为什么要使用 `notifyAll` 的原因。
-
-- 等待唤醒 `condition` 
-
-```java
-public class ConditionQueueTestClass extends BasicLogger {
-
-    public static void main(String[] args) {
-        ConditionQueue<String> queue = new ConditionQueue<>();
-        new Thread(()->{
-            try {
-                for (;;){
-                    queue.put("resource");
-                }
-            }catch (Exception e){
-                e.printStackTrace();
-            }
-        }, "生产者-1").start();
-
-        new Thread(()->{
-            try {
-                for (;;){
-                    queue.take();
-                }
-            }catch (Exception e){
-                e.printStackTrace();
-            }
-        }, "消费者-1").start();
-
-    }
-
-    public static class ConditionQueue<T>{
-        private final LinkedList<T> queue = new LinkedList<>();
-
-        // 显式锁
-        private final ReentrantLock lock = new ReentrantLock();
-        private final Condition producerCondition = lock.newCondition();
-        private final Condition consumerCondition = lock.newCondition();
-
-        public void put(T resource) throws InterruptedException {
-            lock.lock();
-            try {
-                while (queue.size() >= 1){
-                    LOGGER.info("线程：{} ；队列已满", Thread.currentThread().getName());
-                    producerCondition.await();
-                }
-                LOGGER.info("线程：{} ；生产产品", Thread.currentThread().getName());
-                queue.push(resource);
-                consumerCondition.signal();
-            }finally {
-                lock.unlock();
-            }
-        }
-
-        public void take() throws InterruptedException {
-            lock.lock();
-            try {
-                while (queue.size() <= 0){
-                    LOGGER.info("线程：{} ；没有产品", Thread.currentThread().getName());
-                    consumerCondition.await();
-                }
-                LOGGER.info("线程：{} ；消费产品", Thread.currentThread().getName());
-                queue.pop();
-                producerCondition.signal();
-            }finally {
-                lock.unlock();
-            }
-        }
-    }
-}
-```
-
-`condition` 使用 `ReentrantLock` 对象的 `newCondition` 方法创建，可以将 `condition` 理解为一个储存线程的队列。当在线程中执行 `Condition#await()` 方法时，线程就会被移入相应的队列，当执行指定 `Condition` 的 `signal` 或者 `signalAll` 方法时就会唤醒指定队列中的线程。
-
-关于 `ReentrantLock` 相关知识请查看 [ReentrantLock详解](# ReentrantLock)
-
 ## 锁
+
+### 线程安全
+
+
 
 ### AQS
 
@@ -669,9 +357,9 @@ public class ConditionQueueTestClass extends BasicLogger {
 
 **`CLH` 队列锁** 
 
-`CLH` 锁是有由 `Craig` ,  `Landin` ,  `and Hagersten` 这三个人发明的锁，取了三个人名字的首字母，所以叫 `CLH Lock` 。
+`CLH` 锁是有由 `Craig` ,  `Landin` ,  `Hagersten` 这三个人发明的锁，取了三个人名字的首字母，所以叫 `CLH Lock` 。
 
-`CLH` 队列锁也是一种基于**链表**的可扩展、高性能、公平的自旋锁，申请线程仅仅在本地变量上自旋，它不断轮询前驱的状态，假设发现前驱释放了锁就结束自旋。
+`CLH` 队列锁也是一种基于**双向链表**的可扩展、高性能、公平的自旋锁，申请线程仅仅在本地变量上自旋，它不断轮询前驱的状态，假设发现前驱释放了锁就结束自旋。
 
 
 
@@ -1140,6 +828,464 @@ private void doReleaseShared() {
 
 ### ReentrantLock
 
+
+## FutureTask
+
+### FutureTask 是什么
+
+要了解 `FutureTask` 是什么首先要了解这个类是为了解决什么问题，现在有一个场景，我们需要请求一个接口而这个网络请求是耗时操作，我们需要用到多线程技术，在请求发出后的一段时间之内我们需要在主线程中知道这个接口是否返回了数据，是否成功等情况。这时就需要用到 `FutureTask` 来实现这个需求，在此类中有很多方法可以让我们获取到线程的状态以及去操作线程。
+
+![image-20220120101305193](photo\36、FutureTask方法列表(7).png)
+
+### 使用 FutureTask
+
+```java
+public static void main(String[] args) throws ExecutionException, InterruptedException, TimeoutException {
+    FutureTask<String> futureTask = new FutureTask<>(new Callable<String>() {
+        @Override
+        public String call() throws Exception {
+            LOGGER.info("start thread");
+            Thread.sleep(2000L);
+            return "This is result data";
+        }
+    });
+    new Thread(futureTask).start();
+    LOGGER.info("Mission Is Done : {}", futureTask.isDone());
+    String result = futureTask.get();
+    // String result = futureTask.get(1, TimeUnit.SECONDS); // 在指定的时间超时后会抛出 TimeoutException
+    LOGGER.info("Mission Is Done : {}", futureTask.isDone());
+    LOGGER.info("Result Data : {}", result);
+}
+```
+
+- 在实例化 `FutureTask` 时传入 `Callable` 对象
+- 将 `FutureTask` 对象传入 Thread 并执行线程
+- 使用 `isDone` 方法检查是否执行完成
+- 使用 `get` 方法获取到返回的内容
+
+> `get` 方法有两个重载方法，一个无参数另一个需要传入超时时间，超时后抛出 `TimeoutException` 异常。
+>
+> 在执行 `get` 方法时，主线程会被阻塞，知道获取到返回结果或者超时。
+
+### 解析源码
+
+#### 实例化 FutureTask
+
+`FutureTask` 拥有两个构造方法，一个直接传入 `Callable` 对象，另一个传入 `Runnable` 对象和一个默认的返回值，因为 `FutureTask` 类默认是存在可以获取返回值的。
+
+```java
+public FutureTask(Callable<V> callable) {
+    if (callable == null)
+        throw new NullPointerException();
+    this.callable = callable;
+    this.state = NEW;       // ensure visibility of callable
+}
+
+public FutureTask(Runnable runnable, V result) {
+    this.callable = Executors.callable(runnable, result);
+    this.state = NEW;       // ensure visibility of callable
+}
+```
+
+在当传入的对象是 `Callable` 时，`FutureTask` 会直接将 `Callable` 赋值给属性。当传入的 `Runnable` 时会使用到线程池对象 `Executors` 的 `callable` 方法，将 `Runnable` 转换为 `Callable`。
+
+```java
+public static <T> Callable<T> callable(Runnable task, T result) {
+    if (task == null)
+        throw new NullPointerException();
+    return new RunnableAdapter<T>(task, result);
+}
+
+// RunnableAdapter
+static final class RunnableAdapter<T> implements Callable<T> {
+    final Runnable task;
+    final T result;
+    RunnableAdapter(Runnable task, T result) {
+        this.task = task;
+        this.result = result;
+    }
+    public T call() {
+        task.run();
+        return result;
+    }
+}
+```
+
+可以看到，`Runnable` 和 传入的返回值被传入到 `RunnableAdapter` 对象中，此对象实现 `Callable` 接口并在 `call` 方法中调用了 `Runnable` 的 `run` 方法，并将传入的返回值进行返回。至此，使用传入的 `Runnable` 对象和默认返回值转换为 `Callable` 对象。
+
+#### 传入到 Thread
+
+从下图可知，`FutureTask` 实现了 `RunnableFuture` 而 `RunnableFuture` 接口类继承了 `Runnable` 和 `Future` ，因此 `FutureTask` 本质上还是 `Runnable` ，所以可以直接传入 `Thread` 类中。
+
+![image-20220120112001460](photo\37、FutureTask继承结构图(7).png) 
+
+在 `FutureTask` 中的 `run` 方法最后还是执行的是 `Callable` 的 `call` 方法。
+
+#### FutureTask 如何包装 Runnable 和 Callable
+
+![image-20220120170609195](photo\38、FutureTask包装任务类(7).png) 
+
+#### get 方法
+
+`FutureTask` 使用以下状态用来区分当前线程的状态
+
+```java
+private volatile int state;
+private static final int NEW          = 0;
+private static final int COMPLETING   = 1;
+private static final int NORMAL       = 2;
+private static final int EXCEPTIONAL  = 3;
+private static final int CANCELLED    = 4;
+private static final int INTERRUPTING = 5;
+private static final int INTERRUPTED  = 6; 
+```
+
+- `NEW` ：新建
+- `COMPLETING` ：即将完成
+- `NORMAL` ：完成
+- `EXECEPTIONAL` ：抛异常
+- `CANCELLED` ：任务取消
+- `INTERRRUPTING` ：任务即将被打断
+- `INTERRUPTED` ：任务被打断
+
+`get` 方法源码
+
+```java
+public V get() throws InterruptedException, ExecutionException {
+    int s = state; // 获取当前
+    if (s <= COMPLETING) // 状态为新建或即将完成
+        s = awaitDone(false, 0L);
+    return report(s);
+} 
+```
+
+`get` 方法会阻塞线程等待返回，阻塞部分的核心代码就是 `awaitDone` 方法。
+
+```java
+private int awaitDone(boolean timed, long nanos)
+    throws InterruptedException {
+    final long deadline = timed ? System.nanoTime() + nanos : 0L;
+    WaitNode q = null;
+    boolean queued = false;
+    for (;;) {
+        if (Thread.interrupted()) {
+            removeWaiter(q);
+            throw new InterruptedException();
+        }
+
+        int s = state;
+        if (s > COMPLETING) {
+            if (q != null)
+                q.thread = null;
+            return s;
+        }
+        else if (s == COMPLETING) // cannot time out yet
+            Thread.yield();
+        else if (q == null)
+            q = new WaitNode();
+        else if (!queued)
+            queued = UNSAFE.compareAndSwapObject(this, waitersOffset,
+                                                 q.next = waiters, q);
+        else if (timed) {
+            nanos = deadline - System.nanoTime();
+            if (nanos <= 0L) {
+                removeWaiter(q);
+                return state;
+            }
+            LockSupport.parkNanos(this, nanos);
+        }
+        else
+            LockSupport.park(this);
+    }
+} 
+```
+
+关于阻塞部分，方法中使用了 `LockSupport` 这是一个阻塞线程工具类，提供了多种方法用来阻塞及唤醒线程。
+
+```java
+public static void park(Object blocker); // 暂停当前线程
+public static void parkNanos(Object blocker, long nanos); // 暂停当前线程，不过有超时时间的限制
+public static void parkUntil(Object blocker, long deadline); // 暂停当前线程，直到某个时间
+public static void park(); // 无期限暂停当前线程
+public static void parkNanos(long nanos); // 暂停当前线程，不过有超时时间的限制
+public static void parkUntil(long deadline); // 暂停当前线程，直到某个时间
+public static void unpark(Thread thread); // 恢复当前线程
+public static Object getBlocker(Thread t);
+```
+
+#### LockSupport 简单使用
+
+使用 `LockSupport` 阻塞线程后唤醒。
+
+```java
+public static void main(String[] args) throws InterruptedException {
+    List<Thread> threadList = new ArrayList<>();
+
+    for (int i = 0; i < 5; i ++){
+        int finalI = i;
+        Thread thread = new Thread(() -> {
+            LOGGER.info("启动线程：{}", finalI);
+            LockSupport.park();
+            LOGGER.info("线程恢复：{}", finalI);
+        });
+        thread.setName("线程--"+finalI);
+        thread.start();
+        threadList.add(thread);
+    }
+
+    Thread.sleep(2000L);
+    LOGGER.info("主线程恢复");
+    for (Thread thread : threadList) {
+        LockSupport.unpark(thread);
+    }
+}
+```
+
+结果
+
+```java
+2022-01-21 09:43:59.993 [线程--0] INFO  java.lang.Thread - 启动线程：0
+2022-01-21 09:43:59.993 [线程--2] INFO  java.lang.Thread - 启动线程：2
+2022-01-21 09:43:59.993 [线程--1] INFO  java.lang.Thread - 启动线程：1
+2022-01-21 09:43:59.993 [线程--3] INFO  java.lang.Thread - 启动线程：3
+2022-01-21 09:43:59.993 [线程--4] INFO  java.lang.Thread - 启动线程：4
+2022-01-21 09:44:02.007 [main] INFO  java.lang.Thread - 主线程恢复
+2022-01-21 09:44:02.007 [线程--0] INFO  java.lang.Thread - 线程恢复：0
+2022-01-21 09:44:02.007 [线程--4] INFO  java.lang.Thread - 线程恢复：4
+2022-01-21 09:44:02.007 [线程--3] INFO  java.lang.Thread - 线程恢复：3
+2022-01-21 09:44:02.007 [线程--2] INFO  java.lang.Thread - 线程恢复：2
+2022-01-21 09:44:02.007 [线程--1] INFO  java.lang.Thread - 线程恢复：1
+```
+
+## 线程间通信
+
+### 什么是线程间通信
+
+同进程下的线程是可以访问共享数据的，线程间通信的定义为针对同一资源的操作有不同种类的线程。即为多个不同作用的线程操作同一资源，最经典的实例就是生产者消费者。
+
+### 生产者与消费者
+
+生产者消费者顾名思义就是生产产品的对象和消费产品的对象，在消费者消费时发现产品已经没有了，此时就要通知生产者进行生产。反之生产者生产出产品也需要通知消费者进行消费。
+
+#### 代码实现
+
+- 轮询实现
+
+```java
+public class WhileQueueTestClass extends BasicLogger {
+
+    public static void main(String[] args) {
+        // 队列
+        WhileQueue<String> queue = new WhileQueue<>();
+
+        // 生产者
+        new Thread(() -> {
+            for (int i = 0; i < 100; i++) {
+                try {
+                    queue.put("消息" + i);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
+
+        // 消费者
+        new Thread(() -> {
+            for (int i = 0; i < 100; i++) {
+                try {
+                    queue.take();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
+    }
+
+    /**
+     * 轮询版本
+     */
+    public static class WhileQueue<T> {
+        // 容器，用来装东西
+        private final LinkedList<T> queue = new LinkedList<>();
+
+        public void put(T resource) throws InterruptedException {
+            while (queue.size() >= 1) {
+                // 队列满了，不能再塞东西了，轮询等待消费者取出数据
+                System.out.println("生产者：队列已满，无法插入...");
+                TimeUnit.MILLISECONDS.sleep(1000);
+            }
+            System.out.println("生产者：插入" + resource + "!!!");
+            queue.addFirst(resource);
+        }
+
+        public void take() throws InterruptedException {
+            while (queue.size() <= 0) {
+                // 队列空了，不能再取东西，轮询等待生产者插入数据
+                System.out.println("消费者：队列为空，无法取出...");
+                TimeUnit.MILLISECONDS.sleep(1000);
+            }
+            System.out.println("消费者：取出消息!!!");
+            queue.removeLast();
+            TimeUnit.MILLISECONDS.sleep(5000);
+        }
+
+    }
+}
+```
+
+轮询状态线程并没有处于等待或休眠状态，而是一直处于运行状态，因此这种方法会极大程度的消耗性能，造成很多无所谓的消耗。
+
+- 等待唤醒 `wait/notify` 
+
+使用 `wait` 方法可以使线程进入等待状态，使用 `notify` 随机唤醒一个等待中的线程，使用 `notifyAll` 唤醒所有等待中的线程。
+
+```java
+public class ThreadQueueTestClass {
+
+    public static void main(String[] args) {
+        // 队列
+        WaitNotifyQueue<String> queue = new WaitNotifyQueue<>();
+
+        // 生产者
+        new Thread(() -> {
+            for (int i = 0; i < 100; i++) {
+                try {
+                    queue.put("消息" + i);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }, "生产者--1").start();
+
+        // 消费者
+        new Thread(() -> {
+            for (int i = 0; i < 100; i++) {
+                try {
+                    queue.take();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }, "消费者--1").start();
+
+    }
+
+    public static class WaitNotifyQueue<T> extends BasicLogger {
+        // 容器队列，用于放置生产的产品
+        private final LinkedList<T> queue = new LinkedList<>();
+
+        public synchronized void put(T resource) throws InterruptedException {
+            while (queue.size() >= 1) {
+                // 队列中已经存在内容
+                LOGGER.info("生产者：队列已满，无法继续");
+                this.wait();
+            }
+            LOGGER.info("生产者：生产 {} ", resource);
+            queue.addFirst(resource);
+            this.notifyAll();
+        }
+
+        public synchronized void take() throws InterruptedException {
+            while (queue.size() <= 0) {
+                // 队列无内容
+                LOGGER.info("消费者：队列为空，无法继续");
+                this.wait();
+            }
+            LOGGER.info("消费者：使用产品");
+            queue.removeLast();
+            this.notifyAll();
+        }
+    }
+}
+```
+
+> - 为什么使用 `notifyAll` 
+>
+>   - 当使用的方法为 `notify` 时，此方法会随机唤醒一个线程，当生产者线程为多个时，有可能因为两次唤醒的都是生产者线程导致程序阻塞。
+>
+> - 为什么 `LinkedList` 是 `final` 状态
+>
+>   - 因为两个方法执行时是不同的线程，在子线程中只可以访问常量，所以需要使用 `final` 修饰。
+>
+> - 为什么方法中需要使用 `syncronized` 同步锁
+>
+>   - 因为 ` queue` 是生产者线程和消费者线程都需要操作的对象，所以需要保证此对象的原子性，即此对象不可以同时被多个线程修改，所以需要方法上添加 `syncronized` 同步锁，保证同一时间只有一个线程在修改此对象。
+>
+> 注：线程在执行 `wait` 方法后进入 `WAITING` 状态，此状态必须使用 `notify` 唤醒之后才可以继续执行，否则将会一直处于 `WAITING` 状态导致程序阻塞，这也是为什么要使用 `notifyAll` 的原因。
+
+- 等待唤醒 `condition` 
+
+```java
+public class ConditionQueueTestClass extends BasicLogger {
+
+    public static void main(String[] args) {
+        ConditionQueue<String> queue = new ConditionQueue<>();
+        new Thread(()->{
+            try {
+                for (;;){
+                    queue.put("resource");
+                }
+            }catch (Exception e){
+                e.printStackTrace();
+            }
+        }, "生产者-1").start();
+
+        new Thread(()->{
+            try {
+                for (;;){
+                    queue.take();
+                }
+            }catch (Exception e){
+                e.printStackTrace();
+            }
+        }, "消费者-1").start();
+
+    }
+
+    public static class ConditionQueue<T>{
+        private final LinkedList<T> queue = new LinkedList<>();
+
+        // 显式锁
+        private final ReentrantLock lock = new ReentrantLock();
+        private final Condition producerCondition = lock.newCondition();
+        private final Condition consumerCondition = lock.newCondition();
+
+        public void put(T resource) throws InterruptedException {
+            lock.lock();
+            try {
+                while (queue.size() >= 1){
+                    LOGGER.info("线程：{} ；队列已满", Thread.currentThread().getName());
+                    producerCondition.await();
+                }
+                LOGGER.info("线程：{} ；生产产品", Thread.currentThread().getName());
+                queue.push(resource);
+                consumerCondition.signal();
+            }finally {
+                lock.unlock();
+            }
+        }
+
+        public void take() throws InterruptedException {
+            lock.lock();
+            try {
+                while (queue.size() <= 0){
+                    LOGGER.info("线程：{} ；没有产品", Thread.currentThread().getName());
+                    consumerCondition.await();
+                }
+                LOGGER.info("线程：{} ；消费产品", Thread.currentThread().getName());
+                queue.pop();
+                producerCondition.signal();
+            }finally {
+                lock.unlock();
+            }
+        }
+    }
+}
+```
+
+`condition` 使用 `ReentrantLock` 对象的 `newCondition` 方法创建，可以将 `condition` 理解为一个储存线程的队列。当在线程中执行 `Condition#await()` 方法时，线程就会被移入相应的队列，当执行指定 `Condition` 的 `signal` 或者 `signalAll` 方法时就会唤醒指定队列中的线程。
+
+关于 `ReentrantLock` 相关知识请查看 [ReentrantLock详解](# ReentrantLock)
 
 
 ## 阻塞队列
