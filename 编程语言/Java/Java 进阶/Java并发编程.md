@@ -153,38 +153,9 @@ LOGGER.info("线程状态：{}", thread5.getState()); // TERMINATED
 
 正常执行完成的线程进入结束状态。
 
-
 ### 使用多线程
 
 在Java中最重要的三个和线程相关的类是 `Thread` `Runnable` `Callable` ，其中 `Thread` 是真正创建和运行线程的类而其余两个只是接口，用于向 `Thread` 类中传入对象引用用于执行方法的。以下源代码中可以看到 `Runnable` 和 `Callable` 类并没有实质性的方法，真正创建线程和执行的是 `Thread` 类。Thread 类是线程类而 `Runnable` 和 `Callable` 是任务类，任务类只是将需要执行的任务进行封装后传入线程类来真正执行。
-
-`Runnable` 类：
-
-```java
-@FunctionalInterface
-public interface Runnable {
-    public abstract void run();
-}
-```
-
-`Callable` 类：
-
-```java
-@FunctionalInterface
-public interface Callable<V> {
-    V call() throws Exception;
-}
-```
-
-`Thread` 类：
-
-```java
-public class Thread implements Runnable {
-    // code
-}
-```
-
-### 源码解析
 
 #### Thread 类
 
@@ -286,9 +257,129 @@ public static void sleep(long millis, int nanos) throws InterruptedException {
 
 > 注意：此方法不会将线程进入阻塞状态，只会将线程重新置为可运行状态 `RUNNABLE` 。
 
+##### join方法
+
+`join` 方法有三个重载，此方法的作用是等待线程完成运行。
+
+```java
+public final void join() throws InterruptedException {
+    join(0);
+}
+```
+
+此方法是 `join` 的主要方法啊，其他的重载方法都是在调用此方法。
+
+```java
+public final synchronized void join(long millis) throws InterruptedException {
+    long base = System.currentTimeMillis(); // 当前系统时间
+    long now = 0;
+
+    if (millis < 0) { // 指定的等待时间小于0，抛出参数异常错误
+        throw new IllegalArgumentException("timeout value is negative");
+    }
+
+    if (millis == 0) { // 指定的等待时间为0
+        while (isAlive()) { // 当线程在存活状态时循环调用wait方法
+            wait(0); // 使当前线程进入等待状态
+        }
+    } else {
+        while (isAlive()) { // 若此线程存活
+            // 将需要等待的时间减去已等待的时间得出还需等待的时间
+            long delay = millis - now;
+            // 当等待时间已经清零，直接退出循环
+            if (delay <= 0) {
+                break;
+            }
+            // 将调用此方法的线程进入等待状态
+            wait(delay);
+            // 将运行等待后的时间减去等待前的时间，得出已经等待的时间
+            now = System.currentTimeMillis() - base; 
+        }
+    }
+}
+```
+
+`wait` 方法是 `Object` 类中的方法，作用是将调用此方法的线程进入等待状态，`timeout` 为超时时间若超时时间为零，则一直等待知道通知唤醒。
+
+```java
+public final native void wait(long timeout) throws InterruptedException;
+```
+
+此方法的逻辑与 `sleep` 的同参方法逻辑相同，实际只有毫秒进入方法，纳秒没有实际使用。
+
+```java
+public final synchronized void join(long millis, int nanos) throws InterruptedException {
+    if (millis < 0) {
+        throw new IllegalArgumentException("timeout value is negative");
+    }
+    if (nanos < 0 || nanos > 999999) {
+        throw new IllegalArgumentException(
+                            "nanosecond timeout value out of range");
+    }
+    if (nanos >= 500000 || (nanos != 0 && millis == 0)) {
+        millis++;
+    }
+    join(millis);
+}
+```
+
+##### interrupt方法
+
+此方法会设置线程的中断标志位，如果线程在 `sleep` 、`wait` 、`join` 处于阻塞状态时，线程会定时检查中断标志位若发现中断则会抛出 `InterruptedException` 异常，并在异常抛出后将中断标志位清除。若线程在运行状态或获取锁 `synchronized` `lock` 等，则会忽略中断。
+
+```java
+public void interrupt() {
+    if (this != Thread.currentThread())
+        checkAccess();
+
+    synchronized (blockerLock) {
+        Interruptible b = blocker;
+        if (b != null) {
+            interrupt0();           // Just to set the interrupt flag
+            b.interrupt(this);
+            return;
+        }
+    }
+    interrupt0();
+}
+```
+
+```java
+public final void checkAccess() {
+    SecurityManager security = System.getSecurityManager();
+    if (security != null) {
+        security.checkAccess(this);
+    }
+}
+```
+
+##### suspend和resume方法
+
+使用 `suspend` 挂起线程使用 `resume` 唤醒，由于此方法容易发生死锁，自 `jdk7` 已标记为弃用。
+
 #### Callable 类
 
 `Callable` 类和 `Runnable` 类一样是一个接口类，不同之处在于 `Callable` 的 `call` 方法拥有返回值，而 `Runnable` 的 `run` 方法没有返回值。
+
+```java
+@FunctionalInterface
+public interface Callable<V> {
+    V call() throws Exception;
+}
+```
+
+#### Runnable 类
+
+`Runnable` 类：
+
+```java
+@FunctionalInterface
+public interface Runnable {
+    public abstract void run();
+}
+```
+
+
 
 #### 代码实例
 
@@ -347,7 +438,80 @@ service.shutdown();
 
 ### 线程安全
 
+要想了解 `java` 线程安全就要了解 `java` 中线程是如何调用共享资源，也就是 `JMM` 内存模型。
 
+#### JMM 内存模型
+
+`JMM` `Java Memory Model` ，是一种基于计算机内存模型（定义了共享内存系统中多线程程序读写操作行为的规范），屏蔽了各种硬件和操作系统的访问差异，保证 `java` 程序在各平台下对内存的访问都能保证效果一致的规范。保证共享内存的原子性、可见性、有序性。
+
+![image-20220131155830443](photo/48、多线程共享变量操作(7).png) 
+
+由此可见，多线程操作同一变量时其实是将变量复制到线程工作内存后再进行操作，线程不可以直接操作位于主内存中的变量。当然，线程在修改线程工作内存后，需要将工作内存中的变量同步到主内存中。
+
+> 注意：每个线程的工作内存都是独立的，线程之间不可以访问其他线程的工作内存。
+
+线程执行逻辑图
+
+![image-20220131161846234](photo/49、多线程共享变量运行图(7).png) 
+
+具体何时将数据同步到主内存中由 `JMM` 决定，`JMM` 规定了何时以及如何做线程工作内存与主内存之间的数据同步。
+
+#### 线程安全三原则
+
+**原子性**：
+
+最共享内存的操作必须要么全部执行，且中间不可被任何外部因素打断，要么就不执行。
+
+**可见性**：
+
+多线程操作共享内存时，执行结果能够及时同步到主内存中，确保所有线程可以获取到最新的值。
+
+**有序性**：
+
+程序的执行顺序按照代码顺序执行，在多线程环境下 `JMM` 为了性能优化，编译器和处理器会对指令进行重排，程序会变成无序执行。
+
+#### 代码示例
+
+```java
+private static Integer m = 0;
+
+public static void main(String[] args) throws InterruptedException {
+    Thread[] threads = new Thread[100];
+
+    for (int i = 0; i < threads.length; i++) {
+        threads[i] = new Thread(()->{
+            for (int i1 = 0; i1 < 100; i1++) {
+                m++;
+            }
+        });
+    }
+
+    for (Thread thread : threads) {
+        thread.start();
+    }
+
+    for (Thread thread : threads) {
+        thread.join();
+    }
+
+    LOGGER.info("m的值：{}", m);
+}
+```
+
+使用100个线程并发修改同一个值 `m` ，每个线程将 `m` 自增100次若程序正常执行最后 `m` 的值应该为10000。但是在实际执行中，通常 `m` 的值无法达到10000。
+
+```shell
+2022-01-31 17:09:35.071 [main] INFO  java.lang.Thread - m的值：8456
+2022-01-31 17:11:42.616 [main] INFO  java.lang.Thread - m的值：9413
+2022-01-31 17:11:50.083 [main] INFO  java.lang.Thread - m的值：9235
+2022-01-31 17:12:00.287 [main] INFO  java.lang.Thread - m的值：9305
+```
+
+可以看到每次执行的结果都不相同，且结果并没有达到10000。
+
+![image-20220131172820107](photo/50、多线程安全运行图(7).png) 
+
+由上图可知，当线程 `AB` 从主内存中获取变量拷贝到线程内存中，此时在线程 `AB` 中的变量都是为0。此时线程 `A` 将 `m` 自增两次后同步到主内存，主内存中 `m` 为2。此时线程 `B` 也将 `m` 增加了三次，也将 `m` 同步到了主内存中，此时线程 `A` 同步的 `m` 将会被线程 `B` 的同步操作覆盖，也就相当于最后的值少了2，这也是上面代码执行结果最后总数小于10000的原因。
 
 ### AQS
 
@@ -357,9 +521,9 @@ service.shutdown();
 
 **`CLH` 队列锁** 
 
-`CLH` 锁是有由 `Craig` ,  `Landin` ,  `Hagersten` 这三个人发明的锁，取了三个人名字的首字母，所以叫 `CLH Lock` 。
+`CLH` 锁是有由 `Craig` ,  `Landin` ,  `Hagersten` 这三个人发明的锁，取了三个人名字的首字母，所以叫 `CLH` 锁。
 
-`CLH` 队列锁也是一种基于**双向链表**的可扩展、高性能、公平的自旋锁，申请线程仅仅在本地变量上自旋，它不断轮询前驱的状态，假设发现前驱释放了锁就结束自旋。
+`CLH` 队列锁也是一种基于**双向链表**的可扩展、高性能、公平的自旋锁，申请线程仅仅在本地变量上自旋，它不断轮询前驱的状态，发现前驱释放了锁就结束自旋。
 
 
 
