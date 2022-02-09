@@ -470,7 +470,7 @@ service.shutdown();
 
 程序的执行顺序按照代码顺序执行，在多线程环境下 `JMM` 为了性能优化，编译器和处理器会对指令进行重排，程序会变成无序执行。
 
-#### 代码示例
+#### 线程安全问题代码示例
 
 ```java
 private static Integer m = 0;
@@ -512,6 +512,169 @@ public static void main(String[] args) throws InterruptedException {
 ![image-20220131172820107](photo/50、多线程安全运行图(7).png) 
 
 由上图可知，当线程 `AB` 从主内存中获取变量拷贝到线程内存中，此时在线程 `AB` 中的变量都是为0。此时线程 `A` 将 `m` 自增两次后同步到主内存，主内存中 `m` 为2。此时线程 `B` 也将 `m` 增加了三次，也将 `m` 同步到了主内存中，此时线程 `A` 同步的 `m` 将会被线程 `B` 的同步操作覆盖，也就相当于最后的值少了2，这也是上面代码执行结果最后总数小于10000的原因。
+
+#### 线程同步
+
+##### 概述
+
+`Java` 提供了一系列关键字和相关类来保证线程安全，`JVM` 是如何实现线程同步的？
+
+###### 线程和共享数据
+
+`Java` 的优点之一就是语言层面上对多线程的支持，这种支持大部分集中在多线程对共享数据的访问，`JVM` 的内存结构主要包含堆、栈、方法区等。
+
+`JVM` 虚拟机中，每个线程独享一块栈内存其中包含局部变量、线程调用的所有方法的参数和返回值。其他线程无权访问到该栈内存中的数据（这一块栈内存也就是上边图中标记的线程工作内存），栈中的数据仅限于基本类型和对象引用。所以 `JVM` 中栈内是无法储存真实的对象信息的，只可以保存对象的引用，真正的对象保存在堆中。
+
+堆内存中的数据是所有线程共享的，任何线程都可以访问到。堆中只包含对象，所以堆中无法保存任何基本类型和对象引用。
+
+> 注：在 `Java` 中数组也是一个对象，所以它也是保存在堆内存中的。
+
+最后，方法区和栈类似，其中也只包含基本类型和对象的引用，和栈不同的是方法区的静态变量是可以被所有线程访问到的。
+
+###### 对象和类的锁
+
+由上面的描述可知，`JVM` 中两种内存区域是可以被所有线程访问到的。
+
+- 堆内存：存放所有对象
+- 方法区：存放静态变量、基本类型及对象引用
+
+当有多个线程同时访问同一个对象或者同一个静态变量时，这时对多个线程进行管控避免出现线程安全问题。
+
+为了协调多个线程之间对共享数据的访问，虚拟机对每个对象和类都分配了一个锁。在同一时刻，只可以有一个线程访问这个类或者对象（即获取锁，将类或对象锁定）。如果一个线程想要获得某个类或者对象的锁，就需要询问 `JVM` ，当线程申请获取某个类或对象的锁之后， `JVM` 就会在合适的实际把锁分配到这个线程，当然这个线程也有可以永远无法获取锁。当一个线程不在需要锁之后就会解锁 `unlock` ，这时 `JVM` 就会将锁分配给其他正在等待锁的线程。
+
+> 注：类锁其实本质上是由对象锁实现的，因为 `JVM` 在加载一个类时，会将其实例化为一个 `java.lang.Class` 对象，类锁就是锁住对应的 `Class` 对象。
+
+###### Monitors 监视器
+
+监视器的主要功能是监视一段代码，保证同时只有一个线程在执行。每个监视器都与一个对象相关联，当线程执行到监视器监视的第一行指令时，线程必须获取被保护对象的锁。在线程获取锁之前，值无法执行这段代码的，当获取锁之后便可以执行被保护的代码。
+
+###### 多次加锁
+
+同一个线程可以对同一个对象进行多次加锁，每个对象维护着一个记录着被锁次数的计数器，未被锁定的对象的该计数器为0。当一个线程获得锁后，该计数器自增变为 1 ，当同一个线程再次获得该对象的锁的时候，计数器再次自增。当同一个线程释放锁的时候，计数器再自减，当计数器为0的时锁将被释放，其他线程便可以获得锁。
+
+###### 同步
+
+在 `Java` 中，当有多个线程都必须要对同一个共享数据进行访问时，有一种协调方式叫做同步。 `Java` 语言提供了两种内置方式来使线程同步的访问数据：同步代码块和同步方法。详见[Synchronized关键字](#Synchronized) 
+
+##### Synchronized
+
+`Synchronized` 关键字可对类和对象进行加锁，保证方法或者代码块中资源的互斥访问，即在同一时间及同一 `Monitor` 监视的代码，最多只能有一个线程在访问。
+
+###### 使用方法
+
+```java
+public class SyncTestClass {
+
+    // 普通方法
+    public void TestMethod1(){
+        int a = 10;
+        System.out.println(a);
+    }
+
+    // 添加同步关键字方法
+    public synchronized void TestMethod2(){
+        int a = 10;
+        System.out.println(a);
+    }
+
+    // 添加同步代码块方法
+    public void TestMethod3(){
+        synchronized (SyncTestClass.class){
+            int a = 10;
+            System.out.println(a);
+        }
+    }
+
+}
+```
+
+###### 解析
+
+将上面的代码的 `class` 文件使用 `javap -c <filename>` 命令反编译。
+
+```assembly
+public class com.mochen.advance.juc.sync.SyncTestClass {
+  public com.mochen.advance.juc.sync.SyncTestClass();
+    Code:
+       0: aload_0
+       1: invokespecial #1    // Method java/lang/Object."<init>":()V
+       4: return
+
+
+  public void TestMethod1();
+    Code:
+       0: bipush        10
+       2: istore_1
+       3: getstatic     #2    // Field java/lang/System.out:Ljava/io/PrintStream;
+       6: iload_1
+       7: invokevirtual #3    // Method java/io/PrintStream.println:(I)V
+      10: return
+
+  public synchronized void TestMethod2();
+    Code:
+       0: bipush        10
+       2: istore_1
+       3: getstatic     #2    // Field java/lang/System.out:Ljava/io/PrintStream;
+       6: iload_1
+       7: invokevirtual #3    // Method java/io/PrintStream.println:(I)V
+      10: return
+
+  public void TestMethod3();
+    Code:
+       0: ldc           #4    // class com/mochen/advance/juc/sync/SyncTestClass
+       2: dup
+       3: astore_1
+       4: monitorenter
+       5: bipush        10
+       7: istore_2
+       8: getstatic     #2    // Field java/lang/System.out:Ljava/io/PrintStream;
+      11: iload_2
+      12: invokevirtual #3    // Method java/io/PrintStream.println:(I)V
+      15: aload_1
+      16: monitorexit
+      17: goto          25
+      20: astore_3
+      21: aload_1
+      22: monitorexit
+      23: aload_3
+      24: athrow
+      25: return
+    Exception table:
+       from    to  target type
+           5    17    20   any
+          20    23    20   any
+}
+```
+
+可以看到 `TestMethod2` 在 `TestMethod1` 基础上增加了 `synchronized` 关键字，使用代码块方式则是使用 `monitorenter` 和 `monitorexit` 来实现同步功能。
+
+关于同步方法和同步代码块的解释 来源：[JVM doc Synchronization](https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-3.html#jvms-3.14) 
+
+Synchronization in the Java Virtual Machine is implemented by monitor entry and exit, either explicitly (by use of the *monitorenter* and *monitorexit* instructions) or implicitly (by the method invocation and return instructions).
+
+For code written in the Java programming language, perhaps the most common form of synchronization is the `synchronized` method. A `synchronized` method is not normally implemented using *monitorenter* and *monitorexit*. Rather, it is simply distinguished in the run-time constant pool by the `ACC_SYNCHRONIZED` flag, which is checked by the method invocation instructions ([§2.11.10](https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-2.html#jvms-2.11.10)).
+
+同步的实现方式有两种，一种是显式的使用 `monitorenter` 和 `monitorexit` 指令实现，另一种是隐式的使用方法的调用和返回来使用。
+
+对于用Java编程语言编写的代码，可能最常见的同步形式是 `synchronized` 方法。 `synchronized` 方法通常不会使用 `monitorenter` 和 `monitorexit` 实现。它只是在运行时常数池中由`ACC_SYNCHRONIZED`标志来区分，该标志由方法调用指令检查。 可以把执行 `monitorenter` 指令理解为加锁，执行 `monitorexit` 理解为释放锁。
+
+###### 特点
+
+保证方法或代码块操作的原子性
+
+在同步关键字的代码块或方法中内部资源互斥访问，同一时间只有一个线程在访问共享资源，从而保障资源操作的原子性。
+
+保证监视资源的可见性
+
+保证多线程环境下对监视资源的数据同步，即任何线程在获取到 `Monitor` 后的第一时间，会将共享内存中的数据复制到自己的栈内存中；并在任何线程释放 `Monitor` 时，会先将自身私有内存中的数据复制到共享内存中。
+
+保证线程间操作的有序性
+
+`Synchronized` 关键字的原子性保证了由其描述的方法或代码操作具有有序性，不会触发 `JMM` 指令重排机制。
+
+##### Volatile 
+
+
 
 ### AQS
 
