@@ -434,33 +434,15 @@ service.shutdown();
 
 `Callable` 和 `Runnable` 是不同的，而 `Thread` 中是无法传入 `Callable` 对象的，这时就需要用到一个新技术线程池，使用 `Executors` 新建一个线程池，最后使用线程池的 `submit` 方法传入 `Callable` 对象进行线程的创建和执行。关于线程池相关请查看[Java线程池](#线程池) 
 
-## 锁
+## 线程安全及锁
 
-### 线程安全
+### 什么是线程安全
 
-要想了解 `java` 线程安全就要了解 `java` 中线程是如何调用共享资源，也就是 `JMM` 内存模型。
-
-#### JMM 内存模型
-
-`JMM` `Java Memory Model` ，是一种基于计算机内存模型（定义了共享内存系统中多线程程序读写操作行为的规范），屏蔽了各种硬件和操作系统的访问差异，保证 `java` 程序在各平台下对内存的访问都能保证效果一致的规范。保证共享内存的原子性、可见性、有序性。
-
-![image-20220131155830443](photo/48、多线程共享变量操作(7).png) 
-
-由此可见，多线程操作同一变量时其实是将变量复制到线程工作内存后再进行操作，线程不可以直接操作位于主内存中的变量。当然，线程在修改线程工作内存后，需要将工作内存中的变量同步到主内存中。
-
-> 注意：每个线程的工作内存都是独立的，线程之间不可以访问其他线程的工作内存。
-
-线程执行逻辑图
-
-![image-20220131161846234](photo/49、多线程共享变量运行图(7).png) 
-
-具体何时将数据同步到主内存中由 `JMM` 决定，`JMM` 规定了何时以及如何做线程工作内存与主内存之间的数据同步。
-
-#### 线程安全三原则
+#### 线程安全三要素
 
 **原子性**：
 
-最共享内存的操作必须要么全部执行，且中间不可被任何外部因素打断，要么就不执行。
+最共享内存的操作必须要么全部执行要么不执行，且中间不可被任何外部因素打断。
 
 **可见性**：
 
@@ -468,9 +450,11 @@ service.shutdown();
 
 **有序性**：
 
-程序的执行顺序按照代码顺序执行，在多线程环境下 `JMM` 为了性能优化，编译器和处理器会对指令进行重排，程序会变成无序执行。
+程序的执行顺序需要按照代码顺序执行，因为在多线程环境下 `JMM` 为了性能优化，编译器和处理器会对指令进行重排，程序会变成无序执行。
 
-#### 线程安全问题代码示例
+#### 问题代码示例
+
+若在多线程编码过程中不遵守线程安全三要素，会发生很多意想不到的效果。
 
 ```java
 private static Integer m = 0;
@@ -513,13 +497,143 @@ public static void main(String[] args) throws InterruptedException {
 
 由上图可知，当线程 `AB` 从主内存中获取变量拷贝到线程内存中，此时在线程 `AB` 中的变量都是为0。此时线程 `A` 将 `m` 自增两次后同步到主内存，主内存中 `m` 为2。此时线程 `B` 也将 `m` 增加了三次，也将 `m` 同步到了主内存中，此时线程 `A` 同步的 `m` 将会被线程 `B` 的同步操作覆盖，也就相当于最后的值少了2，这也是上面代码执行结果最后总数小于10000的原因。
 
-#### 线程同步
 
-##### 概述
+### CPU相关
+
+#### CPU概述
+
+**中央处理器** （英语：**C**entral **P**rocessing **U**nit，缩写：**CPU**）是[计算机](https://zh.wikipedia.org/wiki/计算机)的主要设备之一，功能主要是解释计算机[指令](https://zh.wikipedia.org/wiki/指令)以及处理计算机[软件](https://zh.wikipedia.org/wiki/软件)中的[数据](https://zh.wikipedia.org/wiki/数据)。计算机的可编程性主要是指对中央处理器的[编程](https://zh.wikipedia.org/wiki/编程)。1970年代以前，中央处理器由多个独立单元构成，后来发展出由[集成电路](https://zh.wikipedia.org/wiki/集成电路)制造的中央处理器，这些高度收缩的器件就是所谓的[微处理器](https://zh.wikipedia.org/wiki/微处理器)，其中分出的中央处理器最为复杂的电路可以做成单一微小功能强大的单元，也就是所谓的核心。
+
+出自：[中央处理器-wiki](https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%A4%AE%E5%A4%84%E7%90%86%E5%99%A8) 
+
+计算机主板上放置 `CPU` 的槽和 `CPU` 都被称作 `socket` ，根据语义的不同指不同的实体。在生产 `CPU` 时会将一大块晶圆 `Silicon Wafer` 分隔为很多小块，而这单个小块晶圆就称作为 `die` 。`CPU` 绿色的部分其实是一块 `PCB` 板，而 `die` 正是镶嵌在这块 `pcb` 上。
+
+一块 `die` 上可以有多个核心 `core` ，而一块 `cpu` 的 `pcb` 上也可以有多个 `die` 。而 `die` 的大小对 `cpu` 的性能和成本也会有很大影响，`die` 越大则出错的几率也越大良品率下降成本增加，因为 `die` 内部的各部分组件直接通过片内总线相连对性能也有很大提升，例如 `Intel Xeon` 系列的高端处理器中整个 `cpu` 中只有一个 `die` 。反之，`die` 越小虽然良品率上升成本下降，也会因为 `die` 大小原因无法放下更多核心或多个 `die` 之间需要片外总线相连导致性能下降，例如 `AMD` 的 `EYPC CPU` 。
+
+![image-20220210163711496](photo/53、CPU简单结构图(7).png) 
+
+出自：[CPU DIE - zhihu](https://zhuanlan.zhihu.com/p/51354994) 
+
+相关：[为什么晶圆都是圆的 - zhihu](https://zhuanlan.zhihu.com/p/30513730) 
+
+#### CPU 缓存
+
+计算机的储存硬件通常是固态硬盘 `ssd` 或者机械硬盘 `hdd` ，由于存储介质及其物理特性导致 `ssd` 硬盘比 `hdd` 硬盘存取速度甚至可以高出十几倍之多。虽然 `ssd` 硬盘的速度已经非常可观，但是和 `cpu` 的吞吐量相比差距十分巨大。所以就有了内存 `ram` 用作 `cpu` 和硬盘之间的桥梁，`cpu` 想要读取硬盘中的数据首先需要将数据加载到 `ram` 中再进行下一步操作。
+
+虽然添加内存之后 `cpu` 的性能得到进一步的发挥，但是内存一般使用 `DRAM` 技术，使用 `DRAM` 储存一位数据需要一个电容加一个晶体管，数据储存在电容中，电容需要充放电才可以进行读写操作，这就导致在读写过程中产生较大的延迟。于是就需要 `cpu` 缓存技术，`cpu` 缓存一般是与核心一起封装在一个 `die` 中，这样的设计也会使性能大大增加。`cpu` 缓存一般采用 `SRAM` 技术，`SRAM` 储存一位数据需要六个晶体管性能方面较 `DRAM` 也有较大提升，因此 `cpu` 缓存的频率与 `cpu` 频率相近。而由于 `SRAM` 技术成本较高且缓存位于 `die` 中，因此 `cpu` 缓存一般只有几十 `KB` 到几十 `MB` 。
+
+详见：[SRAM 与 DRAM](# SRAM 与 DRAM) 
+
+现代 `cpu` 一般有三层缓存，呈金字塔状，最接近 `cpu` 的缓存（一般使用 `L1` 标记）容量最小性能也最高，其他缓存性能逐层递减容量也递增。当 `cpu` 查询某条数据时会先从 `L1` 缓存中查找若命中 `cache hit` 则直接使用，若未命中 `cache miss` 则从下一级缓存中查找，直到从内存中获取，最后经过缓存返回到 `cpu` 中。
+
+> 注：在随机读取状态下，内存的读取速度会下降，因为随机读取会导致大量的 `cache miss` 致使性能下降。
+
+英特尔 `skylake` 架构
+
+![BW_GT3e](photo/52、Intel处理器skylake架构(7).png) 
+
+可以看到上图中的 `L1、L2、L3` 三级缓存，以及最右侧的 `DRAM` 内存。
+
+#### SRAM 与 DRAM
+
+`SRAM` 与 `DRAM` 都会在断电后丢失数据，由于前者性能强于后者但成本大于后者，所以 `SRAM` 用作 `cpu` 缓存，而 `DRAM` 用作内存（内存条）。
+
+##### SRAM 静态随机存取储存器
+
+**静态随机存取存储器**（**S**tatic **R**andom **A**ccess **M**emory，**SRAM**）是[随机存取存储器](https://zh.wikipedia.org/wiki/随机存取存储器)的一种。所谓的“静态”，是指这种存储器只要保持[通电](https://zh.wikipedia.org/wiki/電)，里面存储的数据就可以恒常保持[[1\]](https://zh.wikipedia.org/wiki/静态随机存取存储器#cite_note-skorobogatov-1)。相对之下，[动态随机存取存储器](https://zh.wikipedia.org/wiki/動態隨機存取記憶體)（DRAM）里面所存储的数据就需要周期性地更新。然而，当电力供应停止时，SRAM存储的数据还是会消失（被称为[易失性存储器](https://zh.wikipedia.org/wiki/易失性存储器)），这与在断电后还能存储资料的[ROM](https://zh.wikipedia.org/wiki/ROM)或[闪存](https://zh.wikipedia.org/wiki/快閃記憶體)是不同的。
+
+出自：[静态随机存取储存器 - wiki](https://zh.wikipedia.org/wiki/%E9%9D%99%E6%80%81%E9%9A%8F%E6%9C%BA%E5%AD%98%E5%8F%96%E5%AD%98%E5%82%A8%E5%99%A8) 
+
+##### DRAM 动态随机存取储存器
+
+**动态随机存取存储器**（**Dynamic Random Access Memory**，**DRAM**）是一种[半导体](https://zh.wikipedia.org/wiki/半导体)[存储器](https://zh.wikipedia.org/wiki/記憶體)，主要的作用原理是利用[电容](https://zh.wikipedia.org/wiki/電容)内存储[电荷](https://zh.wikipedia.org/wiki/電荷)的多寡来代表一个[二进制](https://zh.wikipedia.org/wiki/二进制)[比特](https://zh.wikipedia.org/wiki/位元)（bit）是1还是0。由于在现实中晶体管会有漏电电流的现象，导致电容上所存储的电荷数量并不足以正确的判别资料，而导致资料毁损。因此对于DRAM来说，周期性地充电是一个不可避免的条件。由于这种需要定时刷新的特性，因此被称为“动态”存储器。相对来说，静态存储器（[SRAM](https://zh.wikipedia.org/wiki/静态随机存取存储器)）只要存入资料后，纵使不刷新也不会丢失数据。
+
+与SRAM相比，DRAM的优势在于结构简单——每一个比特的资料都只需一个电容跟一个[晶体管](https://zh.wikipedia.org/wiki/電晶體)来处理，相比之下在SRAM上一个比特通常需要六个晶体管。正因这缘故，DRAM拥有非常高的密度，单位体积的容量较高因此成本较低。但相反的，DRAM也有访问速度较慢，耗电量较大的缺点。
+
+与大部分的[随机存取存储器](https://zh.wikipedia.org/wiki/隨機存取記憶體)（RAM）一样，由于存在DRAM中的资料会在电力切断以后很快消失，因此它属于一种[易失性存储器](https://zh.wikipedia.org/wiki/揮發性記憶體)（volatile memory）设备。
+
+出自：[动态随机存取储存器 - wiki](https://zh.wikipedia.org/wiki/%E5%8A%A8%E6%80%81%E9%9A%8F%E6%9C%BA%E5%AD%98%E5%8F%96%E5%AD%98%E5%82%A8%E5%99%A8) 
+
+#### MESI 协议
+
+因为 `IO` 操作的数据访问具有空间连续性（需要访问内存中的很多数据），但是 `IO` 操作较慢，而在 `IO` 操作时读一个字节和读多个字节的时间基本相同，所以内存中操作 `IO` 不是以字节为单位，而是以块为单位。即 `cpu` 缓存中最小的储存单元是缓存行 `cache line` ，而每一级的缓存都会被划分为多组 `cache line` 。例如在 `x86 cpu` 中一个缓存行储存 `64` 字节的数据。
+
+`MESI` 协议即是对缓存行的定义，此协议定义了缓存行的四种状态，使用额外的两位来标识。
+
+- `M` ：被修改状态 `Modified` 
+
+​		该缓存行只被缓存在该 `cpu` 中，并且是被修改过的即此缓存行中的数据与内存中的数据不一致。该缓存行中的数据需要在允许其他 `cpu` 读取内存中相应位置的数据前进行写回 `write back` ，当缓存行中的数据被写回后其状态会变为独享状态 `exclusive` 。
+
+- `E` ：独享状态 `Exclusive` 
+
+​		该缓存行对应内存的数据只被该 `cpu` 缓存，该缓存行中的数据与对应内存中的数据相同。当其他 `cpu` 在读取对应内存中的数据后，此缓存行变为共享状态 `shared` 。当修改此缓存行中的数据后，此缓存行变为被修改状态 `modified` 。
+
+- `S` ：共享状态 `Shared` 
+
+​		该缓存行中的数据被多个 `cpu` 缓存，且各个 `cpu` 缓存行中的数据与内存中的数据相同。当某一个 `cpu` 修改对应缓存行中的数据时，该 `cpu` 的该缓存行变为被修改状态 `modified` ，其他 `cpu` 的对象缓存行变为无效状态 `invalid` 。
+
+- `I` ：无效状态 `Invalid` 
+
+​		该缓存行是无效状态，其他缓存了对应内存中数据的 `cpu` 修改了它的缓存行内容。
+
+缓存行状态转换图
+
+![4b4bfeaeec21d904d63e82d6a389e78d](photo/54、MESI协议缓存状态转换图(7).png) 
+
+
+
+#### 伪共享
+
+同时更新来自不同处理器的相同缓存代码行中的单个元素会使整个缓存代码行无效，即使这些更新在逻辑上是彼此独立的。每次对缓存代码行的单个元素进行更新时，都会将此代码行标记为**无效**。其他访问同一代码行中不同元素的处理器将看到该代码行已标记为**无效**。即使所访问的元素未被修改，也会强制它们从内存或其他位置获取该代码行的较新副本。这是因为基于缓存代码行保持缓存一致性，而不是针对单个元素的。因此，互连通信和开销方面都将有所增长。并且，正在进行缓存代码行更新的时候，禁止访问该代码行中的元素。
+
+
+
+[oracle 伪共享](https://docs.oracle.com/cd/E19205-01/821-0393/aewcx/index.html) 
+
+[Java 中的伪共享](https://juejin.cn/post/7019475740970188837) 
+
+### JVM 内存
+
+`JVM` 内存分区是 `JVM` 在运行过程中数据区（内存）的分区。
+
+`JMM` 内存模型是一个抽象的概念
+
+#### JVM 内存分区
+
+
+
+#### JMM 内存模型
+
+`JMM` `Java Memory Model` ，是一种基于计算机内存模型（定义了共享内存系统中多线程程序读写操作行为的规范），屏蔽了各种硬件和操作系统的访问差异，保证 `java` 程序在各平台下对内存的访问都能保证效果一致的规范。
+
+多线程下 `JVM` 内存分区示例图
+
+![image-20220210101158476](photo/51、JVM多线程内存模型(7).png) 
+
+
+
+![image-20220131155830443](photo/48、多线程共享变量操作(7).png) 
+
+由此可见，多线程操作同一变量时其实是将变量复制到线程工作内存后再进行操作，线程不可以直接操作位于主内存中的变量。当然，线程在修改线程工作内存后，需要将工作内存中的变量同步到主内存中。
+
+> 注意：每个线程的工作内存都是独立的，线程之间不可以访问其他线程的工作内存。
+
+线程执行逻辑图
+
+![image-20220131161846234](photo/49、多线程共享变量运行图(7).png) 
+
+具体何时将数据同步到主内存中由 `JMM` 决定，`JMM` 规定了何时以及如何做线程工作内存与主内存之间的数据同步。
+
+#### Java 对象模型
+
+
+
+
+### 线程同步
 
 `Java` 提供了一系列关键字和相关类来保证线程安全，`JVM` 是如何实现线程同步的？
 
-###### 线程和共享数据
+#### 线程和共享数据
 
 `Java` 的优点之一就是语言层面上对多线程的支持，这种支持大部分集中在多线程对共享数据的访问，`JVM` 的内存结构主要包含堆、栈、方法区等。
 
@@ -531,7 +645,7 @@ public static void main(String[] args) throws InterruptedException {
 
 最后，方法区和栈类似，其中也只包含基本类型和对象的引用，和栈不同的是方法区的静态变量是可以被所有线程访问到的。
 
-###### 对象和类的锁
+#### 对象和类的锁
 
 由上面的描述可知，`JVM` 中两种内存区域是可以被所有线程访问到的。
 
@@ -544,40 +658,38 @@ public static void main(String[] args) throws InterruptedException {
 
 > 注：类锁其实本质上是由对象锁实现的，因为 `JVM` 在加载一个类时，会将其实例化为一个 `java.lang.Class` 对象，类锁就是锁住对应的 `Class` 对象。
 
-###### Monitors 监视器
+#### Monitors 监视器
 
 监视器的主要功能是监视一段代码，保证同时只有一个线程在执行。每个监视器都与一个对象相关联，当线程执行到监视器监视的第一行指令时，线程必须获取被保护对象的锁。在线程获取锁之前，值无法执行这段代码的，当获取锁之后便可以执行被保护的代码。
 
-###### 多次加锁
 
-同一个线程可以对同一个对象进行多次加锁，每个对象维护着一个记录着被锁次数的计数器，未被锁定的对象的该计数器为0。当一个线程获得锁后，该计数器自增变为 1 ，当同一个线程再次获得该对象的锁的时候，计数器再次自增。当同一个线程释放锁的时候，计数器再自减，当计数器为0的时锁将被释放，其他线程便可以获得锁。
 
-###### 同步
+### 关键字
 
-在 `Java` 中，当有多个线程都必须要对同一个共享数据进行访问时，有一种协调方式叫做同步。 `Java` 语言提供了两种内置方式来使线程同步的访问数据：同步代码块和同步方法。详见[Synchronized关键字](#Synchronized) 
+由 `Java` 封装好底层功能用于解决线程安全，实现线程安全三要素的相关关键字。
 
-##### Synchronized
+#### Synchronized
 
 `Synchronized` 关键字可对类和对象进行加锁，保证方法或者代码块中资源的互斥访问，即在同一时间及同一 `Monitor` 监视的代码，最多只能有一个线程在访问。
 
-###### 使用方法
+##### 使用方法
 
 ```java
 public class SyncTestClass {
 
-    // 普通方法
+    // 普通方法无同步
     public void TestMethod1(){
         int a = 10;
         System.out.println(a);
     }
 
-    // 添加同步关键字方法
+    // 在方法上添加关键字
     public synchronized void TestMethod2(){
         int a = 10;
         System.out.println(a);
     }
 
-    // 添加同步代码块方法
+    // 同步代码块
     public void TestMethod3(){
         synchronized (SyncTestClass.class){
             int a = 10;
@@ -588,7 +700,7 @@ public class SyncTestClass {
 }
 ```
 
-###### 解析
+##### 解析
 
 将上面的代码的 `class` 文件使用 `javap -c <filename>` 命令反编译。
 
@@ -654,11 +766,11 @@ Synchronization in the Java Virtual Machine is implemented by monitor entry and 
 
 For code written in the Java programming language, perhaps the most common form of synchronization is the `synchronized` method. A `synchronized` method is not normally implemented using *monitorenter* and *monitorexit*. Rather, it is simply distinguished in the run-time constant pool by the `ACC_SYNCHRONIZED` flag, which is checked by the method invocation instructions ([§2.11.10](https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-2.html#jvms-2.11.10)).
 
-同步的实现方式有两种，一种是显式的使用 `monitorenter` 和 `monitorexit` 指令实现，另一种是隐式的使用方法的调用和返回来使用。
+同步的实现方式有两种，一种是显式的使用 `monitorenter` 和 `monitorexit` 指令实现，另一种是隐式的使用方法的调用和返回来实现。
 
 对于用Java编程语言编写的代码，可能最常见的同步形式是 `synchronized` 方法。 `synchronized` 方法通常不会使用 `monitorenter` 和 `monitorexit` 实现。它只是在运行时常数池中由`ACC_SYNCHRONIZED`标志来区分，该标志由方法调用指令检查。 可以把执行 `monitorenter` 指令理解为加锁，执行 `monitorexit` 理解为释放锁。
 
-###### 特点
+##### 特点
 
 保证方法或代码块操作的原子性
 
@@ -672,7 +784,7 @@ For code written in the Java programming language, perhaps the most common form 
 
 `Synchronized` 关键字的原子性保证了由其描述的方法或代码操作具有有序性，不会触发 `JMM` 指令重排机制。
 
-##### Volatile 
+#### Volatile 
 
 
 
