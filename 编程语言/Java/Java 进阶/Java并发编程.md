@@ -1,5 +1,3 @@
-# Java 并发编程
-
 ## 概述
 
 ### 并发与并行
@@ -510,7 +508,7 @@ public static void main(String[] args) throws InterruptedException {
 
 一块 `die` 上可以有多个核心 `core` ，而一块 `cpu` 的 `pcb` 上也可以有多个 `die` 。而 `die` 的大小对 `cpu` 的性能和成本也会有很大影响，`die` 越大则出错的几率也越大良品率下降成本增加，因为 `die` 内部的各部分组件直接通过片内总线相连对性能也有很大提升，例如 `Intel Xeon` 系列的高端处理器中整个 `cpu` 中只有一个 `die` 。反之，`die` 越小虽然良品率上升成本下降，也会因为 `die` 大小原因无法放下更多核心或多个 `die` 之间需要片外总线相连导致性能下降，例如 `AMD` 的 `EYPC CPU` 。
 
-![image-20220210163711496](photo/53、CPU简单结构图(7).png) 
+![image-20220211142800536](photo/53、CPU简单结构图(7).png)  
 
 出自：[CPU DIE - zhihu](https://zhuanlan.zhihu.com/p/51354994) 
 
@@ -518,15 +516,40 @@ public static void main(String[] args) throws InterruptedException {
 
 #### CPU 缓存
 
+##### 概述
+
 计算机的储存硬件通常是固态硬盘 `ssd` 或者机械硬盘 `hdd` ，由于存储介质及其物理特性导致 `ssd` 硬盘比 `hdd` 硬盘存取速度甚至可以高出十几倍之多。虽然 `ssd` 硬盘的速度已经非常可观，但是和 `cpu` 的吞吐量相比差距十分巨大。所以就有了内存 `ram` 用作 `cpu` 和硬盘之间的桥梁，`cpu` 想要读取硬盘中的数据首先需要将数据加载到 `ram` 中再进行下一步操作。
+
+##### 缓存与内存
 
 虽然添加内存之后 `cpu` 的性能得到进一步的发挥，但是内存一般使用 `DRAM` 技术，使用 `DRAM` 储存一位数据需要一个电容加一个晶体管，数据储存在电容中，电容需要充放电才可以进行读写操作，这就导致在读写过程中产生较大的延迟。于是就需要 `cpu` 缓存技术，`cpu` 缓存一般是与核心一起封装在一个 `die` 中，这样的设计也会使性能大大增加。`cpu` 缓存一般采用 `SRAM` 技术，`SRAM` 储存一位数据需要六个晶体管性能方面较 `DRAM` 也有较大提升，因此 `cpu` 缓存的频率与 `cpu` 频率相近。而由于 `SRAM` 技术成本较高且缓存位于 `die` 中，因此 `cpu` 缓存一般只有几十 `KB` 到几十 `MB` 。
 
 详见：[SRAM 与 DRAM](# SRAM 与 DRAM) 
 
+##### CPU 中缓存的结构
+
 现代 `cpu` 一般有三层缓存，呈金字塔状，最接近 `cpu` 的缓存（一般使用 `L1` 标记）容量最小性能也最高，其他缓存性能逐层递减容量也递增。当 `cpu` 查询某条数据时会先从 `L1` 缓存中查找若命中 `cache hit` 则直接使用，若未命中 `cache miss` 则从下一级缓存中查找，直到从内存中获取，最后经过缓存返回到 `cpu` 中。
 
+对于一个完整的 `CPU` ，里面会有若干个核，比如四核八核等等，对于 `CPU` 多核心的场景下，每个核心的 `L1` , `L2` 缓存都只能被这个核访问，别的核无法访问，`L1` ，`L2` 是这个核的私有缓存。而相对应的，`L3` 缓存被以某种协议或者方式链接到 `CPU` 内的一种总线上，供所有核访问，所以，`L3` 为共享缓存。
+
 > 注：在随机读取状态下，内存的读取速度会下降，因为随机读取会导致大量的 `cache miss` 致使性能下降。
+
+##### 缓存性能
+
+一般来说 `L1` 缓存作为最靠近 `cpu` 核心的部分，其频率是与核心频率相同的，当然，容量也是最小的，一般只有几十到几百 `KB` 。而 `L2` 和 `L3` 缓存容量逐级增大，性能也逐级下降。
+
+某 `CPU` 性能表：
+
+|                                 | 时钟周期 | 纳秒（ns） |
+| ------------------------------- | -------- | ---------- |
+| L1 一级缓存                     | 4        | 1.2~2.1    |
+| L2 二级缓存                     | 10       | 3.0~5.3    |
+| L3 三级缓存（核心独享）         | 40       | 12.0~21.4  |
+| L3 三级缓存 （正在共享）        | 65       | 19.5~34.8  |
+| L3 三级缓存（其他核心正在修改） | 75       | 22.5~40.2  |
+| 内存                            |          | 60         |
+
+出自：[CPU缓存(Cache)背后的运行逻辑1-缓存必知](https://zhuanlan.zhihu.com/p/353553358) 
 
 英特尔 `skylake` 架构
 
@@ -556,7 +579,7 @@ public static void main(String[] args) throws InterruptedException {
 
 #### MESI 协议
 
-因为 `IO` 操作的数据访问具有空间连续性（需要访问内存中的很多数据），但是 `IO` 操作较慢，而在 `IO` 操作时读一个字节和读多个字节的时间基本相同，所以内存中操作 `IO` 不是以字节为单位，而是以块为单位。即 `cpu` 缓存中最小的储存单元是缓存行 `cache line` ，而每一级的缓存都会被划分为多组 `cache line` 。例如在 `x86 cpu` 中一个缓存行储存 `64` 字节的数据。
+因为 `IO` 操作的数据访问具有空间连续性（需要访问内存中的很多数据），但是 `IO` 操作较慢，而在 `IO` 操作时读一个字节和读多个字节的时间基本相同，所以内存中操作 `IO` 不是以字节为单位，而是以块为单位。即 `cpu` 缓存中最小的储存单元是缓存行 `cache line` ，而每一级的缓存都会被划分为多组 `cache line` 。目前主流的 `CPU` 的缓存行大小都为 `64B` ，也就是 `512bit` 。这是因为内存的一次传输的单位也是 `64` 字节。
 
 `MESI` 协议即是对缓存行的定义，此协议定义了缓存行的四种状态，使用额外的两位来标识。
 
@@ -584,13 +607,137 @@ public static void main(String[] args) throws InterruptedException {
 
 #### 伪共享
 
+##### 概述
+
 同时更新来自不同处理器的相同缓存代码行中的单个元素会使整个缓存代码行无效，即使这些更新在逻辑上是彼此独立的。每次对缓存代码行的单个元素进行更新时，都会将此代码行标记为**无效**。其他访问同一代码行中不同元素的处理器将看到该代码行已标记为**无效**。即使所访问的元素未被修改，也会强制它们从内存或其他位置获取该代码行的较新副本。这是因为基于缓存代码行保持缓存一致性，而不是针对单个元素的。因此，互连通信和开销方面都将有所增长。并且，正在进行缓存代码行更新的时候，禁止访问该代码行中的元素。
 
+出自：[Oracle 伪共享](https://docs.oracle.com/cd/E19205-01/821-0393/aewcx/index.html) 
 
+蓝色部分是指定 `cpu` 要使用的数据。 
 
-[oracle 伪共享](https://docs.oracle.com/cd/E19205-01/821-0393/aewcx/index.html) 
+![image-2022021109230149](photo/55、MESI协议伪共享01(7).png)  
 
-[Java 中的伪共享](https://juejin.cn/post/7019475740970188837) 
+当 `cpu1` 中缓存行其使用的元素进行修改时，会将 `cpu1` 的此缓存行标记为被修改，`cpu2` 的对应缓存行则会被标记为无效。
+
+![image-20220211092058984](photo/56、MESI协议伪共享02(7).png) 
+
+当 `cpu2` 需要使用后三个元素时，虽然其元素内容与内存中的内容相同，但由于 `cpu2` 的指定缓存行已经被标记为无效，所以还是需要重新获取最新的数据。
+
+![image-20220211093506888](photo/57、MESI协议伪共享03(7).png) 
+
+伪共享 `cpu` 结构图
+
+![伪共享](photo/58、MESI协议伪共享结构图(7).png) 
+
+可以看到在单 `cpu` 多核的情况下需要重新从 `L3` 缓存获取最新的数据，但是如果是多 `cpu` 甚至需要跨槽 `socket` 读取，需要从内存中加载最新值。
+
+ ##### Java 中的伪共享
+
+伪共享在 `java` 中也是一个实际存在的问题，尤其是在循环等情况下会产生较大的资源浪费。
+
+```java
+class MyObject{
+    long a;
+    long b;
+    long c;
+}
+```
+
+如上，对象中有三个 `long` 型变量，`jvm` 在堆中分配空间时这三个变量是在一起的。一个 `long` 占8个字节，而 `x86` 的缓存行为64个字节，因此这三个变量极有可能会在同一缓存行中。
+
+使用以下代码来测试伪共享对性能的影响。
+
+```java
+public class FalseShareTest implements Runnable {
+    // 使用的线程数量
+    public static int NUM_THREADS = 5;
+    // 数组中元素修改次数
+    public final static long ITERATIONS = 500L * 1000L * 1000L;
+    // 当前对象是第几个元素
+    private final int arrayIndex;
+    // 数组
+    private static VolatileLong[] longs;
+    // 运行10次的总时间
+    public static long SUM_TIME = 0l;
+
+    public FalseShareTest(final int arrayIndex) {
+        this.arrayIndex = arrayIndex;
+    }
+
+    public static void main(final String[] args) throws Exception {
+        Thread.sleep(10000);
+        // 运行10次取均值
+        for(int j=0; j<10; j++){
+            System.out.println(j);
+            // 读参
+            if (args.length == 1) {
+                NUM_THREADS = Integer.parseInt(args[0]);
+            }
+            // 新建数组
+            longs = new VolatileLong[NUM_THREADS];
+            for (int i = 0; i < longs.length; i++) {
+                // 实例化对象赋值
+                longs[i] = new VolatileLong();
+            }
+            final long start = System.nanoTime();
+            // 启动线程并等待完成
+            runTest();
+            final long end = System.nanoTime();
+            SUM_TIME += end - start;
+        }
+        // 取均值
+        System.out.println("平均耗时："+SUM_TIME/10);
+    }
+    private static void runTest() throws InterruptedException {
+        // 线程数组
+        Thread[] threads = new Thread[NUM_THREADS];
+        for (int i = 0; i < threads.length; i++) {
+            // 实例化线程
+            threads[i] = new Thread(new FalseShareTest(i));
+        }
+        // 运行
+        for (Thread t : threads) {
+            t.start();
+        }
+        // 等待完成
+        for (Thread t : threads) {
+            t.join();
+        }
+    }
+    public void run() {
+        // 循环给指定元素赋值
+        long i = ITERATIONS + 1;
+        while (0 != --i) {
+            longs[arrayIndex].value = i;
+        }
+    }
+
+    public final static class VolatileLong {
+        public volatile long value = 0L;
+        // 填充缓存行
+        public long p1, p2, p3, p4, p5, p6;     //屏蔽此行
+    }
+
+}
+```
+
+上面代码使用了一个对象数组，这个对象 `VolatileLong` 中有7个 `long` 型变量，其中 `value` 使用 `volatile` 标记，以保证变量的可见性 详见：[Volatile 详解](# Volatile) 。线程 `run` 方法中的代码就是用不同的线程给数组中不同的元素 `VolatileLong` 对象的 `value` 赋值，使用 `for` 循环实例化对象并填充到数组中，此时，数组中的对象在内存中储存的位置应该彼此相邻。此时，整个数组就会在同一个缓存行中被加载到缓存中，不同线程循环不停赋值时就会出现伪共享现象。因此我们在 `VolatileLong` 对象中添加了6个额外的 `long` 型数据，用于撑大 `VolatileLong` 的大小，使数组中的元素不在同一个缓存行中避免伪共享。
+
+关于对象储存大小的详细介绍请查看：[Java 对象模型](# Java 对象模型) 
+
+一下的图表是填充空值和未填充空值时，分别1-5个线程下程序执行所用时间。
+
+![](photo/59、MESI协议伪共享统计图(7).png)  
+
+可以看到在无填充的情况下处理耗时的增长明显大于填充的情况，非常明显，在无填充时发生了伪共享问题，而这个问题在线程越多的情况下越严重。
+
+测试方法及代码出自：[伪共享（false sharing），并发编程无声的性能杀手 ](https://www.cnblogs.com/cyfonly/p/5800758.html) 
+
+##### 避免伪共享
+
+首先第一种就是使用空白的变量进行填充，使不同的元素无法被保存在同一个缓存行中。第二种是使用 `sun.misc.Contended` 注解来解决此问题，此注解的原理也与空白填充的原理相同。在默认情况下，`＠Contended` 注解只用于 `Java` 核心类， 比如此包下的类。如果用户类路径下的类需要使用这个注解， 则需要添加 `JVM` 参数：`-XX:-RestrictContended` 。填充的宽度默认为前后128字节，要自定义宽度则可以设置 `-XX: ContendPaddingWidth` 参数。
+
+伪共享是很隐蔽的，我们暂时无法从系统层面上通过工具来探测伪共享事件。其次，不同类型的计算机具有不同的微架构（如 32 位系统和 64 位系统的 `java` 对象所占自己数就不一样），如果设计到跨平台的设计，那就更难以把握了，一个确切的填充方案只适用于一个特定的操作系统。并且，缓存的资源是有限的，如果填充会浪费珍贵的 `cache` 资源，并不适合大范围应用。
 
 ### JVM 内存
 
@@ -600,17 +747,47 @@ public static void main(String[] args) throws InterruptedException {
 
 #### JVM 内存分区
 
+`JVM` 在执行 `Java` 程序的过程中会把它所管理的内存划分为若干个不同的数据区域。这些区域都有各自的用途，以及创建和销毁的时间，有的区域随着虚拟机进程的启动而存在，有些区域则依赖用户线程的启动和结束而建立和销毁。
 
+![jvm运行时数据区](photo/60、JVM运行时内存分区(7).png) 
+
+`JVM` 内存分区是一个抽象概念，其中的堆、方法区和线程私有的数据，都有可能出现在物理机的内存、缓存和 `cpu` 寄存器中。
+
+##### 程序计数器
+
+程序计数器 `Program Counter Register` 用于储存当前线程所执行的字节码的地址，程序的分支、循环、跳转、异常、线程恢复等都依赖于计数器。当多线程执行当前线程没有获取到 `cpu` 资源或被其他线程获取，当前线程就需要一个单独的计数器，用于在获取到 `cpu` 资源后恢复到正确的位置继续执行。此计数器保存在线程私有的内存中，各线程之间独立储存互不干扰。
+
+若当前线程执行的是 `Java` 方法，则计数器中储存虚拟机字节码的地址；若执行的是本地方法 `Native Method` ，则这个计数器值为空 `Undefined` 。
+
+> 注：此内存空间是唯一一个在 `JVM` 中没有规定 `OutOfMemoryError` 错误的区域。
+
+##### Java 虚拟机栈 Java Virtual Machine Stacks
+
+`Java` 虚拟机栈 `Java Vitual Machine Stack` 是 `Java` 方法执行的内存模型，在栈中存放的是多个栈帧，每个栈帧对应一个被调用的方法，在栈帧中包含了方法的局部变量 `Local Variables` 、操作数栈 `Operand Stack` 、指向方法所属类的运行时常量池 `Reference to runtime constant pool` 、方法返回地址 `Return Address` 和一些额外信息。当线程执行一个方法，便会自动创建一个对应的栈帧，并将栈帧压入栈中。当方法执行完毕，便会将对应的栈帧出栈，而当前执行的方法会永远处于栈帧的顶部。
+
+![image-20220211165207439](photo/60、JVM运行时内存分区-栈(7).png) 
+
+##### 本地方法栈 Native Method Stacks
+
+本地方法栈作用于 `Java` 栈类似，本地方法栈是用于执行本地方法 `Native Method` 。在JVM规范中，并没有具体规定本地方法栈的具体实现方法以及数据结构，而在 `HotSopt` 虚拟机中直接把本地方法栈和 `Java` 栈合并到了一起。
+
+##### 堆 Heap
+
+`Java` 中堆是用来储存对象的数据，在栈中储存的是对象的引用。在堆中的数据是被所有线程共享的，所有线程都可以访问到堆中的数据，且 `JVM` 中只有一个堆。
+
+> 注：在 `Java` 中数组也是一个对象，所以，数组的数据也是储存在堆中。
+
+##### 方法区 Method Area
+
+方法区在与堆一样都是被线程共享的区域，在方法区中存储了每个类的信息（包括类的名称、方法信息、字段信息）、静态变量、常量以及编译器编译后的代码等。
+
+在 `Class` 文件中除了类的字段、方法、接口等描述信息外，还有一项信息是常量池，用来存储编译期间生成的字面量和符号引用。
+
+在方法区中有一个非常重要的部分就是运行时常量池，它是每一个类或接口的常量池的运行时表示形式，在类和接口被加载到 `JVM` 后，对应的运行时常量池就被创建出来。当然并非Class文件常量池中的内容才能进入运行时常量池，在运行期间也可将新的常量放入运行时常量池中，比如 `String` 的 `intern` 方法。
 
 #### JMM 内存模型
 
-`JMM` `Java Memory Model` ，是一种基于计算机内存模型（定义了共享内存系统中多线程程序读写操作行为的规范），屏蔽了各种硬件和操作系统的访问差异，保证 `java` 程序在各平台下对内存的访问都能保证效果一致的规范。
-
-多线程下 `JVM` 内存分区示例图
-
-![image-20220210101158476](photo/51、JVM多线程内存模型(7).png) 
-
-
+`JMM` `Java Memory Model` ，是一种基于计算机内存模型（定义了共享内存系统中多线程程序读写操作行为的规范）。屏蔽了各种硬件和操作系统的访问差异，保证 `java` 程序在各平台下对内存的访问都能保证效果一致的规范，`JMM` 是一个抽象的概念并没有实际的物理实现。
 
 ![image-20220131155830443](photo/48、多线程共享变量操作(7).png) 
 
@@ -626,7 +803,10 @@ public static void main(String[] args) throws InterruptedException {
 
 #### Java 对象模型
 
+在 `HotSpot` 虚拟机中，设计了一个 `OOP-Klass Model` 。 `OOP（Ordinary Object Pointer）` 指的是普通对象指针，而 `Klass` 用来描述对象实例的具体类型。对象在内存中存储的内容可以分为三个部分：对象头 `Header` 、实例数据 `Instance Data` 和对齐填充 `Padding` 。
 
+- 对象头 `Header` 
+  - 标记字（32位 `JVM` 大小 `4B` ，64位 `JVM` 大小 `8B` ）
 
 
 ### 线程同步
@@ -635,7 +815,7 @@ public static void main(String[] args) throws InterruptedException {
 
 #### 线程和共享数据
 
-`Java` 的优点之一就是语言层面上对多线程的支持，这种支持大部分集中在多线程对共享数据的访问，`JVM` 的内存结构主要包含堆、栈、方法区等。
+`Java` 的优点之一就是语言层面上对多线程的支持，这种支持大部分集中在多线程对共享数据的访问。
 
 `JVM` 虚拟机中，每个线程独享一块栈内存其中包含局部变量、线程调用的所有方法的参数和返回值。其他线程无权访问到该栈内存中的数据（这一块栈内存也就是上边图中标记的线程工作内存），栈中的数据仅限于基本类型和对象引用。所以 `JVM` 中栈内是无法储存真实的对象信息的，只可以保存对象的引用，真正的对象保存在堆中。
 
