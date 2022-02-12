@@ -434,25 +434,54 @@ service.shutdown();
 
 ## 线程安全及锁
 
-### 什么是线程安全
+### 线程安全
+
+#### Java 内存模型
+
+在 `java` 内存模型中内存分为两种，一种是主内存其中储存着所有线程共享的资源，另一种是线程工作内存，其中储存着线程需要用到的主存中的资源副本。
+
+![48、多线程共享变量操作(7)](photo/48、多线程共享变量操作(7).png) 
+
+在 `Java` 内存模型中规定，所有的资源都会被存放在主存中，如果线程需要使用指定的资源，就会将资源复制到指定线程的工作内存中，线程操作的也是自己的工作内存。
+
+关于 `Java` 内存相关请查看： [JVM 内存](/编程语言/Java/JVM%20虚拟机/JVM%20内存) 
 
 #### 线程安全三要素
 
-**原子性**：
+##### 可见性
 
-最共享内存的操作必须要么全部执行要么不执行，且中间不可被任何外部因素打断。
+可见性就是要保证每一个线程在获取值时，必须获取到最新的值。
 
-**可见性**：
+当一个线程修改其工作内存中某个资源副本时，并不会直接更新到主存中，此时主存中的值已经是旧值。这时另一个线程想要使用同样的资源进行操作是，无论是其工作内存中还是拷贝主存中的值，其获取的都是旧值。新的值只在第一个修改此资源的线程的工作内存中存在，其他线程是无法及时获取到最新的值。
 
-多线程操作共享内存时，执行结果能够及时同步到主内存中，确保所有线程可以获取到最新的值。
+解决方法：[Volatile 关键字](# Volatile) 
 
-**有序性**：
+##### 有序性
 
-程序的执行顺序需要按照代码顺序执行，因为在多线程环境下 `JMM` 为了性能优化，编译器和处理器会对指令进行重排，程序会变成无序执行。
+程序的执行顺序需要按照代码顺序执行，因为在多线程环境下 `JMM` 为了性能优化，编译器和处理器会对无数据依赖的指令进行重排。
 
-#### 问题代码示例
+```java
+int a = 1;
+int b = 2;
+int c = a + b;
+```
 
-若在多线程编码过程中不遵守线程安全三要素，会发生很多意想不到的效果。
+上面的代码中 `c` 依赖 `a` 和 `b` 的值，但是 `a` 和 `b` 没有互相依赖，在单线程状态下1/2行的顺序并不影响计算结果，及有可能出现指令重排。
+
+##### 原子性
+
+原子性的含义就是在执行一系列的操作时，要么全部执行，要么不执行，不可以被中断或只执行一部分。
+
+以自增举例，将 `m++` 反编译为字节码。
+
+```
+12: getfield      #2                  // Field b:I
+15: iconst_1
+16: iadd
+17: putfield      #2                  // Field b:I
+```
+
+反编译代码后可以看到，`m++` 并不属于一个原子性操作，它的操作有4步：获取值压入栈、相加数压入栈、二者相加最后赋值。
 
 ```java
 private static Integer m = 0;
@@ -495,53 +524,39 @@ public static void main(String[] args) throws InterruptedException {
 
 由上图可知，当线程 `AB` 从主内存中获取变量拷贝到线程内存中，此时在线程 `AB` 中的变量都是为0。此时线程 `A` 将 `m` 自增两次后同步到主内存，主内存中 `m` 为2。此时线程 `B` 也将 `m` 增加了三次，也将 `m` 同步到了主内存中，此时线程 `A` 同步的 `m` 将会被线程 `B` 的同步操作覆盖，也就相当于最后的值少了2，这也是上面代码执行结果最后总数小于10000的原因。
 
-
-### 线程同步
-
-`Java` 提供了一系列关键字和相关类来保证线程安全，`JVM` 是如何实现线程同步的？
-
-#### 线程和共享数据
-
-[JVM 内存](/编程语言/Java/JVM%20虚拟机/JVM%20内存) 
-
-`Java` 的优点之一就是语言层面上对多线程的支持，这种支持大部分集中在多线程对共享数据的访问。
-
-`JVM` 虚拟机中，每个线程独享一块栈内存其中包含局部变量、线程调用的所有方法的参数和返回值。其他线程无权访问到该栈内存中的数据（这一块栈内存也就是上边图中标记的线程工作内存），栈中的数据仅限于基本类型和对象引用。所以 `JVM` 中栈内是无法储存真实的对象信息的，只可以保存对象的引用，真正的对象保存在堆中。
-
-堆内存中的数据是所有线程共享的，任何线程都可以访问到。堆中只包含对象，所以堆中无法保存任何基本类型和对象引用。
-
-> 注：在 `Java` 中数组也是一个对象，所以它也是保存在堆内存中的。
-
-最后，方法区和栈类似，其中也只包含基本类型和对象的引用，和栈不同的是方法区的静态变量是可以被所有线程访问到的。
-
-#### 对象和类的锁
-
-由上面的描述可知，`JVM` 中两种内存区域是可以被所有线程访问到的。
-
-- 堆内存：存放所有对象
-- 方法区：存放静态变量、基本类型及对象引用
-
-当有多个线程同时访问同一个对象或者同一个静态变量时，这时对多个线程进行管控避免出现线程安全问题。
-
-为了协调多个线程之间对共享数据的访问，虚拟机对每个对象和类都分配了一个锁。在同一时刻，只可以有一个线程访问这个类或者对象（即获取锁，将类或对象锁定）。如果一个线程想要获得某个类或者对象的锁，就需要询问 `JVM` ，当线程申请获取某个类或对象的锁之后， `JVM` 就会在合适的实际把锁分配到这个线程，当然这个线程也有可以永远无法获取锁。当一个线程不在需要锁之后就会解锁 `unlock` ，这时 `JVM` 就会将锁分配给其他正在等待锁的线程。
-
-> 注：类锁其实本质上是由对象锁实现的，因为 `JVM` 在加载一个类时，会将其实例化为一个 `java.lang.Class` 对象，类锁就是锁住对应的 `Class` 对象。
-
-#### Monitors 监视器
-
-监视器的主要功能是监视一段代码，保证同时只有一个线程在执行。每个监视器都与一个对象相关联，当线程执行到监视器监视的第一行指令时，线程必须获取被保护对象的锁。在线程获取锁之前，值无法执行这段代码的，当获取锁之后便可以执行被保护的代码。
-
-
-
 ### 关键字
 
 由 `Java` 封装好底层功能用于解决线程安全，实现线程安全三要素的相关关键字。
 
 #### Synchronized
 
-`Synchronized` 关键字可对类和对象进行加锁，保证方法或者代码块中资源的互斥访问，即在同一时间及同一 `Monitor` 监视的代码，最多只能有一个线程在访问。
+##### 概述
 
-##### 使用方法
+`Synchronized` 关键字底层是由系统的 `Mutex Lock` 实现的，其可对类和对象进行加锁，保证方法或者代码块中资源的互斥访问，即在同一时间及同一 `Monitor` 监视的代码，最多只能有一个线程在访问。
+
+```java
+class A{
+    public void synchronized f1(){}
+    public static void synchronized f2(){}
+}
+```
+
+相当于
+
+```java
+class B{
+    public void f1(){
+        synchronized(this){}
+    }
+    public static void f2(){
+        synchronized(B.class){}
+    }
+}
+```
+
+此关键字对于非静态方法，锁定的是对象实例。而对于静态方法锁定的是类，当然 `B.class` 也是一个对象（所有类都是 `Class` 类的实例化对象）。由于这两个方法锁定的对象不同，一个是 `B` 的实例另一个是 `Class` 的实例，所以，当分别被不同的线程调用并不会互斥。
+
+##### 解析
 
 ```java
 public class SyncTestClass {
@@ -568,8 +583,6 @@ public class SyncTestClass {
 
 }
 ```
-
-##### 解析
 
 将上面的代码的 `class` 文件使用 `javap -c <filename>` 命令反编译。
 
@@ -631,13 +644,11 @@ public class com.mochen.advance.juc.sync.SyncTestClass {
 
 关于同步方法和同步代码块的解释 来源：[JVM doc Synchronization](https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-3.html#jvms-3.14) 
 
-Synchronization in the Java Virtual Machine is implemented by monitor entry and exit, either explicitly (by use of the *monitorenter* and *monitorexit* instructions) or implicitly (by the method invocation and return instructions).
-
-For code written in the Java programming language, perhaps the most common form of synchronization is the `synchronized` method. A `synchronized` method is not normally implemented using *monitorenter* and *monitorexit*. Rather, it is simply distinguished in the run-time constant pool by the `ACC_SYNCHRONIZED` flag, which is checked by the method invocation instructions ([§2.11.10](https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-2.html#jvms-2.11.10)).
-
 同步的实现方式有两种，一种是显式的使用 `monitorenter` 和 `monitorexit` 指令实现，另一种是隐式的使用方法的调用和返回来实现。
 
 对于用Java编程语言编写的代码，可能最常见的同步形式是 `synchronized` 方法。 `synchronized` 方法通常不会使用 `monitorenter` 和 `monitorexit` 实现。它只是在运行时常数池中由`ACC_SYNCHRONIZED`标志来区分，该标志由方法调用指令检查。 可以把执行 `monitorenter` 指令理解为加锁，执行 `monitorexit` 理解为释放锁。
+
+在Java的对象头中，有一块数据叫标记字 `Mark Word` 。在64位机器上，`Mark Word` 是8字节（64位）的，这64位中有2个重要字段：锁标志位和占用该锁的 `thread ID` 。且因为不同版本的 `JVM` 实现，对象头的数据结构会有各种差异。这个标记字就是 `synchronized` 关键字的实现原理，他可以存储该对象是否被锁定，以及当前占用资源的线程。
 
 ##### 特点
 
@@ -647,9 +658,37 @@ For code written in the Java programming language, perhaps the most common form 
 
 保证监视资源的可见性
 
-保证多线程环境下对监视资源的数据同步，即任何线程在获取到 `Monitor` 后的第一时间，会将共享内存中的数据复制到自己的栈内存中；并在任何线程释放 `Monitor` 时，会先将自身私有内存中的数据复制到共享内存中。
+保证多线程环境下对监视资源的数据同步，即任何线程在获取到锁后的第一时间，会将共享内存中的数据复制到自己的工作内存中；并在线程释放锁时，会将自身私有内存中的数据复制到共享内存中。并且只有一个线程执行被锁定的代码，其他线程在此线程释放锁后获取到的资源一定是最新的。
+
+> `synchronized` 无法解决有序性，无法阻止指令重排序。
 
 #### Volatile 
+
+上面使用 `synchronized` 关键字也可以解决资源的可见性，但是使用锁对性能损耗过大。当一个线程获取锁之后，其他线程必须等待其释放锁，这样的解决方案太过于笨重。所以，`synchronized` 通常也被称作重量级锁。
+
+`volatile` 可以在减少性能损耗的前提下解决可见性问题，使用此关键字修饰的变量对其的修改会对其他线程保持可见。可以简单理解为，经过 `volatile` 修饰的关键字线程在操作时会直接修改主存中的值，且会将其他线程工作内存中的该变量标记为无效（ `MESI` 协议），其他线程需要用到此变量时会从主存中获取最新的值。
+
+`volatile` 同时可以阻止指令重排，被其修饰的变量在写 `volatile` 变量时，写入之前的指令不会被重排到写入之后；读 `volatile` 变量时，读之后的操作不会被重排到读之前。
+
+> `volatile` 并不能解决原子性问题。
+
+### CAS
+
+#### 概述
+
+上面介绍了 `m++` 其实分为三步（读、计算和写）可以使用 `synchronized` 关键字解决，但是`synchronized` 缺点是性能消耗较大，而`volatile` 是无法解决原子性问题的。由于这两个原因 `JDK` 提供了 `Unsaft` 类用作高效解决读改写的原子性问题。
+
+`CAS` 全称 `Compare and Swap` 比较和交换，用作对资源的读取和赋值。通常一个 `CAS` 方法有四个参数，分别是指定对象 `Object` 、对象中的变量 `valueOffset` 、变量的预期值 `expect` 和要更新的值 `update` 组成。
+
+```java
+public final native boolean compareAndSwapObject(Object var1, long var2, Object var4, Object var5);
+
+public final native boolean compareAndSwapInt(Object var1, long var2, int var4, int var5);
+
+public final native boolean compareAndSwapLong(Object var1, long var2, long var4, long var6);
+```
+
+#### ABA 问题
 
 
 
