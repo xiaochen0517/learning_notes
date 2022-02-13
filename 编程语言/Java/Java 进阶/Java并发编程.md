@@ -680,6 +680,22 @@ public class com.mochen.advance.juc.sync.SyncTestClass {
 
 `CAS` 全称 `Compare and Swap` 比较和交换，用作对资源的读取和赋值。通常一个 `CAS` 方法有四个参数，分别是指定对象 `Object` 、对象中的变量 `valueOffset` 、变量的预期值 `expect` 和要更新的值 `update` 组成。
 
+#### Unsafe 类
+
+`JDK` 的 `rt.jar` 包中的 `Unsafe` 类提供了系统级别的原子性操作，因为其是直接调用本地方法实现，即 `native` 方法，使用 `JNI` 的方式调用本地 `C++` 函数。
+
+long objectFieldOffset（Field field）方法：返回指定的变量在所属类中的内存偏移地址，该偏移地址仅仅在该Unsafe函数中访问指定字段时使用。如下代码使用Unsafe类获取变量value在AtomicLong对象中的内存偏移。
+
+`openjdk\hotspot\src\share\vm\prims\unsafe.cpp` 
+
+
+
+
+
+int arrayBaseOffset（Class arrayClass）方法：获取数组中第一个元素的地址。
+
+int arrayIndexScale（Class arrayClass）方法：获取数组中一个元素占用的字节。
+
 ```java
 public final native boolean compareAndSwapObject(Object var1, long var2, Object var4, Object var5);
 
