@@ -670,6 +670,10 @@ public class com.mochen.advance.juc.sync.SyncTestClass {
 
 `volatile` 同时可以阻止指令重排，被其修饰的变量在写 `volatile` 变量时，写入之前的指令不会被重排到写入之后；读 `volatile` 变量时，读之后的操作不会被重排到读之前。
 
+```java
+private volatile int a = 0;
+```
+
 > `volatile` 并不能解决原子性问题。
 
 ### CAS
@@ -680,33 +684,262 @@ public class com.mochen.advance.juc.sync.SyncTestClass {
 
 `CAS` 全称 `Compare and Swap` 比较和交换，用作对资源的读取和赋值。通常一个 `CAS` 方法有四个参数，分别是指定对象 `Object` 、对象中的变量 `valueOffset` 、变量的预期值 `expect` 和要更新的值 `update` 组成。
 
-#### Unsafe 类
+> `CAS` 又称无锁操作，是一种乐观锁设计。在多线程访问下共享变量不会被加锁，线程之间不会阻塞排队，也不会被挂起。使用循环对比的方法，直到成功访问修改。看似这种方法消耗资源，其实 `CAS` 底层全部由本地方法实现，效率极高，且并没有同步锁使用系统的 `Mutex Lock` 时，用户态转内核态的资源消耗，因此 `CAS` 是一种非常高效的解决原子性问题的方法。
+
+#### Unsafe 类方法
 
 `JDK` 的 `rt.jar` 包中的 `Unsafe` 类提供了系统级别的原子性操作，因为其是直接调用本地方法实现，即 `native` 方法，使用 `JNI` 的方式调用本地 `C++` 函数。
 
-long objectFieldOffset（Field field）方法：返回指定的变量在所属类中的内存偏移地址，该偏移地址仅仅在该Unsafe函数中访问指定字段时使用。如下代码使用Unsafe类获取变量value在AtomicLong对象中的内存偏移。
+- `long objectFieldOffset（Field field）` 方法：返回指定的变量在所属类中的内存偏移地址，该偏移地址仅仅在该 `Unsafe` 函数中访问指定字段时使用。
+- `int arrayBaseOffset（Class arrayClass）` 方法：获取数组中第一个元素的地址。
+- `int arrayIndexScale（Class arrayClass）` 方法：获取数组中一个元素占用的字节。
+- `boolean compareAndSwapLong（Object obj, long offset, long expect, long update）` 方法：比较对象 `obj` 中偏移量为 `offset` 的变量的值是否与 `expect` 相等，相等则使用 `update` 值更新，然后返回 `true` ，否则返回 `false` 。
+- `public native long getLongvolatile（Object obj, long offset）` 方法：获取对象 `obj` 中偏移量为 `offset` 的变量对应 `volatile` 语义的值。
+- `void putLongvolatile（Object obj, long offset, long value）`方法：设置 `obj` 对象中 `offset` 偏移的类型为 `long` 的 `field` 的值为 `value` ，支持 `volatile` 语义。
+- `boolean compareAndSwapLong（Object obj, long offset, long expect, long update）`方法：比较对象 `obj` 中偏移量为 `offset` 的变量的值是否与 `expect` 相等，相等则使用 `update` 值更新，并返回 `true` ，否则返回 `false` 。
+- `public native long getLongvolatile（Object obj, long offset）`方法：获取对象 `obj` 中偏移量为 `offset` 的变量对应 `volatile` 语义的值。
+- `void putLongvolatile（Object obj, long offset, long value）`方法：设置 `obj` 对象中 `offset` 偏移的类型为 `long` 的 `field` 的值为 `value` ，支持 `volatile` 语义。
+- `void putOrderedLong（Object obj, long offset, long value）` 方法：设置 `obj` 对象中 `offset` 偏移地址对应的 `long` 型 `field` 的值为 `value` 。这是一个有延迟的 `putLongvolatile` 方法，并且不保证值修改对其他线程立刻可见。只有在变量使用 `volatile` 修饰并且预计会被意外修改时才使用该方法。
+- `void park（boolean isAbsolute, long time）` 方法：阻塞当前线程，其中参数 `isAbsolute` 等于 `false` 且 `time` 等于0表示一直阻塞。 `time` 大于0表示等待指定的 `time` 后阻塞线程会被唤醒，这个 `time` 是个相对值，是个增量值，也就是相对当前时间累加 `time` 后当前线程就会被唤醒。如果 `isAbsolute` 等于 `true` ，并且 `time` 大于0，则表示阻塞的线程到指定的时间点后会被唤醒，这里 `time` 是个绝对时间，是将某个时间点换算为 `ms` 后的值。另外，当其他线程调用了当前阻塞线程的 `interrupt` 方法而中断了当前线程时，当前线程也会返回，而当其他线程调用了 `unPark` 方法并且把当前线程作为参数时当前线程也会返回。
+- `void unpark（Object thread）` 方法：唤醒调用 `park` 后阻塞的线程。
 
-`openjdk\hotspot\src\share\vm\prims\unsafe.cpp` 
+`JDK8` 新增内容：
 
-
-
-
-
-int arrayBaseOffset（Class arrayClass）方法：获取数组中第一个元素的地址。
-
-int arrayIndexScale（Class arrayClass）方法：获取数组中一个元素占用的字节。
+- `long getAndSetLong（Object obj, long offset, long update）` 方法：获取对象 `obj` 中偏移量为 `offset` 的变量 `volatile` 语义的当前值，并设置变量 `volatile` 语义的值为 `update` 。
 
 ```java
-public final native boolean compareAndSwapObject(Object var1, long var2, Object var4, Object var5);
-
-public final native boolean compareAndSwapInt(Object var1, long var2, int var4, int var5);
-
-public final native boolean compareAndSwapLong(Object var1, long var2, long var4, long var6);
+public final long getAndSetLong(Object var1, long var2, long var4) {
+    long var6;
+    do {
+        var6 = this.getLongVolatile(var1, var2);
+    } while(!this.compareAndSwapLong(var1, var2, var6, var4));
+    return var6;
+}
 ```
+
+首先获取指定 `offset` 的变量内容，再使用 `compareAndSwapLong` 来修改值。
+
+> 使用 `while` 循环，在失败时重复尝试。
+
+- `long getAndAddLong（Object obj, long offset, long addValue）` 方法：获取对象 `obj` 中偏移量为 `offset` 的变量 `volatile` 语义的当前值，并设置变量值为原始值 `+addValue` 。
+
+其他类似的操作例如 `getAndSetInt` 等也与以上方法相同。
+
+#### 使用 Unsafe
+
+在 `Unsafe` 类中有 `getUnsafe` 方法，可以获取到 `Unsafe` 实例，但在运行时会报错。
+
+```java
+Exception in thread "main" java.lang.SecurityException: Unsafe
+```
+
+```java
+@CallerSensitive
+public static Unsafe getUnsafe() {
+    Class var0 = Reflection.getCallerClass();
+    if (!VM.isSystemDomainLoader(var0.getClassLoader())) {
+        throw new SecurityException("Unsafe");
+    } else {
+        return theUnsafe;
+    }
+}
+```
+
+可以看到 `getUnsafe` 方法中检查了调用此方法类的类加载器，判断其是否为 `Bootstrap` 类加载器加载的类。但是我们在调用时使用的是自己编写的类，是由 `AppClassLoader` 加载的。所以，此处在调用 `getUnsafe` 时会报错。
+
+由于 `Unsafe` 类中的方法都是直接操作内存的，所以它就像它的名字一样是不安全的。所以，在设计时要避免开发人员使用此类，而是只有 `rt.jar` 核心类才可以使用这些方法。
+
+使用万能的反射来重新编码之前多线程安全的问题代码。
+
+```java
+public class BasicTestClass implements BasicLogger {
+
+    private static volatile int m = 0; // 将m使用volatile修饰保证可见性
+    private static Unsafe unsafe = null; // unsafe实例
+
+    public static void main(String[] args) throws Exception {
+        Thread[] threads = new Thread[100]; // 100个线程
+        // 获取m的field对象
+        Field field = BasicTestClass1.class.getDeclaredField("m");
+        // 使用反射回去theUnsafe字段
+        Field theUnsafe = Unsafe.class.getDeclaredField("theUnsafe");
+        theUnsafe.setAccessible(true); // 解除安全检查
+        unsafe = (Unsafe) theUnsafe.get(null);
+        // 获取静态变量m在对象中的偏移值
+        long offset = unsafe.staticFieldOffset(field);
+
+        for (int i = 0; i < threads.length; i++) {
+            threads[i] = new Thread(() -> {
+                for (int i1 = 0; i1 < 100; i1++) {
+                    // m++
+                    unsafe.getAndAddInt(BasicTestClass1.class, offset, 1);
+                }
+            });
+        }
+        for (Thread thread : threads) {
+            thread.start();
+        }
+        for (Thread thread : threads) {
+            thread.join();
+        }
+        LOGGER.info("m的值：{}", m);
+    }
+}
+```
+
+使用 `Unsafe` 类中的方法和 `volatile` 关键字，完美解决了之前出现的问题。
 
 #### ABA 问题
 
+##### 原因
 
+在使用 `CAS` 时不免会有一个问题，如果一个线程 `A` 获取到了变量的值，此时线程 `B` 将值从1修改为2，然后在 `A` 进行下一步操作之前又再次将变量的值从2修改回1。那么此时的线程 `A` 再去比对时，变量的值看似没有变化，但是已经被修改了两次。
+
+##### 解决方法
+
+如何避免出现 `ABA` 问题，这时就要用到 `AtomicStampedReference` 类。此类就相当于在对象上添加了一个标记戳，用此来判断其是否有过修改。
+
+基础方法
+
+```java
+//构造方法, 传入引用和戳
+public AtomicStampedReference(V initialRef, int initialStamp)
+//返回引用
+public V getReference()
+//返回版本戳
+public int getStamp()
+//如果当前引用 等于 预期值并且 当前版本戳等于预期版本戳, 将更新新的引用和新的版本戳到内存
+public boolean compareAndSet(V expectedReference, V newReference, int expectedStamp, int newStamp)
+//如果当前引用 等于 预期引用, 将更新新的版本戳到内存
+public boolean attemptStamp(V expectedReference, int newStamp)
+//设置当前引用的新引用和版本戳
+public void set(V newReference, int newStamp)
+```
+
+测试
+
+```java
+AtomicStampedReference<String> reference = new AtomicStampedReference<String>("First", 1);
+LOGGER.info("原值：{}", reference.getReference());
+reference.compareAndSet("First", "Second", reference.getStamp(), reference.getStamp() + 1);
+LOGGER.info("首次修改值：{}", reference.getReference());
+boolean editStampResult = reference.attemptStamp("Second", reference.getStamp() + 1);
+LOGGER.info("修改标记是否成功：{}", editStampResult);
+LOGGER.info("修改后的标记：{}", reference.getStamp());
+boolean endEditResult = reference.compareAndSet("Second", "Over", 4, reference.getStamp() + 1);
+LOGGER.info("最后修改是否成功：{}", endEditResult);
+LOGGER.info("最后修改值：{}", reference.getReference());
+```
+
+结果
+
+```
+2022-02-14 14:18:02.124 [main] INFO  java.lang.Thread - 原值：First
+2022-02-14 14:18:02.128 [main] INFO  java.lang.Thread - 首次修改值：Second
+2022-02-14 14:18:02.128 [main] INFO  java.lang.Thread - 修改标记是否成功：true
+2022-02-14 14:18:02.128 [main] INFO  java.lang.Thread - 修改后的标记：3
+2022-02-14 14:18:02.128 [main] INFO  java.lang.Thread - 最后修改是否成功：false
+2022-02-14 14:18:02.128 [main] INFO  java.lang.Thread - 最后修改值：Second
+```
+
+除了 `AtomicStampedReference` 类，还有 `AtomicMarkableReference` 只可以使用布尔值，表示是否被修改过。
+
+> 注意：`AtomicMarkableReference` 并不可以完全避免 `ABA` 问题出现，只能降低出现的几率。
+
+#### Atomic 包
+
+##### 概述
+
+`atomic` 包位于 `java.util.concurrent.atomic` 之下，其中有许多具有原子性的类。例如 `AtomicLong` 、`AtomicInteger` 等类，与 `synchronized` 和锁的原理不同，这些原子类都是由 `CAS` 实现。
+
+![image-20220214144738653](photo/49、Atomic包内容(7).png) 
+
+> 注：上方的 `AtomicStampedReference` 和 `AtomicMarkableReference` 都是 `Atomic` 中的一员。
+
+##### 解析
+
+打开 `AtomicInteger` 源码，可以看到成员变量 `unsafe` 。
+
+```java
+// Unsafe 对象
+private static final Unsafe unsafe = Unsafe.getUnsafe();
+// value 变量在此对象中的偏移值
+private static final long valueOffset;
+// 真正储存数据的对象
+private volatile int value;
+```
+
+初始化 `value` 的偏移值。
+
+```java
+static {
+    try {
+        // 获取value的Field对象，使用Field对象获取到value的偏移值
+        valueOffset = unsafe.objectFieldOffset
+            (AtomicInteger.class.getDeclaredField("value"));
+    } catch (Exception ex) { throw new Error(ex); }
+}
+```
+
+构造方法，可以赋默认值。
+
+```java
+public AtomicInteger(int initialValue) {
+    value = initialValue;
+}
+```
+
+以下方法等都是使用 `CAS` 方法实现。
+
+```java
+public final int getAndSet(int newValue) {
+    return unsafe.getAndSetInt(this, valueOffset, newValue);
+}
+
+public final boolean compareAndSet(int expect, int update) {
+    return unsafe.compareAndSwapInt(this, valueOffset, expect, update);
+}
+
+//...
+```
+
+##### 使用
+
+使用原子类来解决线程安全问题示例代码。
+
+```java
+public class AtomicTestClass implements BasicLogger {
+
+    private static AtomicInteger m = new AtomicInteger(0);
+
+    public static void main(String[] args) throws InterruptedException {
+        Thread[] threads = new Thread[100];
+        for (int i = 0; i < 100; i++) {
+            Thread thread = new Thread(() -> {
+                for (int j = 0; j < 10000; j++) {
+                    m.incrementAndGet();
+                }
+            });
+            threads[i] = thread;
+        }
+        for (int i = 0; i < 100; i++) {
+            threads[i].start();
+        }
+        for (int i = 0; i < 100; i++) {
+            threads[i].join();
+        }
+        LOGGER.info("结果：{}", m);
+    }
+}
+```
+
+结果
+
+```
+2022-02-14 15:08:39.809 [main] INFO  java.lang.Thread - 结果：1000000
+```
+
+可以看到使用原子类后结果没有问题。
 
 ### AQS
 
@@ -719,8 +952,6 @@ public final native boolean compareAndSwapLong(Object var1, long var2, long var4
 `CLH` 锁是有由 `Craig` ,  `Landin` ,  `Hagersten` 这三个人发明的锁，取了三个人名字的首字母，所以叫 `CLH` 锁。
 
 `CLH` 队列锁也是一种基于**双向链表**的可扩展、高性能、公平的自旋锁，申请线程仅仅在本地变量上自旋，它不断轮询前驱的状态，发现前驱释放了锁就结束自旋。
-
-
 
 #### 源码详解
 
@@ -1125,11 +1356,11 @@ private void setHeadAndPropagate(Node node, int propagate) {
 }
 ```
 
-
+首先先将传入的节点设置为头结点，并删除其中保存的线程和上一个 `node` 引用删除，并检查剩余资源唤醒下一节点。
 
 ##### releaseShared方法
 
-
+释放线程占用的资源，其中的 `tryReleaseShared` 方法依旧需要具体实现类来实现。
 
 ```java
 public final boolean releaseShared(int arg) {
@@ -1141,11 +1372,9 @@ public final boolean releaseShared(int arg) {
 }
 ```
 
-
-
 ###### doReleaseShared方法
 
-
+此方法用于释放共享资源。
 
 ```java
 private void doReleaseShared() {	
@@ -1171,34 +1400,17 @@ private void doReleaseShared() {
 }
 ```
 
+获取到 `head` 当状态满足时间队列中后继节点唤醒
 
+#### ReentrantLock
 
-###### unparkSuccessor方法
+##### 概述
 
-
-
-```java
-private void unparkSuccessor(Node node) {
-
-    int ws = node.waitStatus;
-    if (ws < 0)
-        compareAndSetWaitStatus(node, ws, 0);
-
-    Node s = node.next;
-    if (s == null || s.waitStatus > 0) {
-        s = null;
-        for (Node t = tail; t != null && t != node; t = t.prev)
-            if (t.waitStatus <= 0)
-                s = t;
-    }
-    if (s != null)
-        LockSupport.unpark(s.thread);
-}
-```
+`ReentrantLock` 是一个可重入的互斥锁，可重入是指一个线程可以多次获取同一个锁，互斥锁指当一个线程获取到锁之后，其他的线程必须等待获取到锁的线程释放锁。`ReentrantLock` 锁与 `synchronized` 关键字的作用相同，它在这基础上添加了
 
 
 
-### ReentrantLock
+
 
 
 ## FutureTask
