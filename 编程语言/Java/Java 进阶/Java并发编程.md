@@ -1416,13 +1416,151 @@ private void doReleaseShared() {
 
 ###### 公平锁
 
-公平锁可以简单理解为排队，最先进入的线程会获取到资源，而在之后进入的线程必须进入等待队列。当拥有资源的线程释放资源时，会唤醒在其后进入队列的线程，让其获取到资源。
+公平锁可以简单理解为排队，最先进入的线程会获取到资源，而在之后进入的线程必须进入等待队列。当拥有资源的线程释放资源时，会唤醒在其后进入队列的线程，让其获取到资源。当拥有资源的线程在释放资源后，若此时有线程进入检测到可以获取资源，但是队列中有等待的线程时，刚进入的线程就会进入队列尾并阻塞等待唤醒。
 
+下面是公平锁的图解，首先线程A进入，`state` 为0可以获取资源，队列中也没有线程，直接获取资源。
 
+![image-20220215090207197](photo/51、公平锁流程01(7).png) 
+
+线程B进入，`state` 无法获取资源，线程进入队列中阻塞等待。
+
+![image-20220215090358355](photo/52、公平锁流程02(7).png) 
+
+线程A释放资源，并唤醒队列中的线程B，让你尝试获取资源。
+
+![image-20220215090723248](photo/53、公平锁流程03(7).png) 
+
+此时一个新的线程C进入，`state` 为0可以获取资源，但此时队列中还有一个等待的线程B，于是线程C也进入等待队列。
+
+![image-20220215090907835](photo/54、公平锁流程04(7).png) 
+
+被唤醒的线程B开始获取资源，获取资源后将其从等待队列中删除。
+
+![image-20220215091039479](photo/55、公平锁流程05(7).png) 
+
+这就是公平锁的运行流程，具体 `ReentrantLock` 是如何实现公平锁与非公平锁，详见：[ReentrantLock 公平锁与非公平锁](# ReentrantLock 公平锁与非公平锁) 。
 
 ###### 非公平锁
 
 非公平锁可以简单理解为新加入的线程都可以插一次队，当最先进入的线程获取到资源之后，再次有线程进入，此时该线程会尝试获取资源。若无法获取到资源则会进入等待队列队尾并阻塞，当拥有资源的线程释放线程后会唤醒在队列中最前的线程，让唤醒的线程尝试获取资源。但是在被唤醒的线程尝试获取资源之前，又有一个新的线程进入此时新的线程就会插队，新进入的线程若获取到资源，被唤醒的线程则会被继续阻塞。若被唤醒的线程获取到资源，新进入的线程则会进入等待队列队尾并阻塞。
+
+线程A进入，检查 `state` 之后直接获取资源。
+
+![image-20220215163233573](photo/57、非公平锁流程01(7).png) 
+
+线程B进入，发现资源已经被获取，进入队列中等待。
+
+![image-20220215163406742](photo/58、非公平锁流程02(7).png) 
+
+线程A释放资源，并唤醒队列中的线程B，等待其获取资源。
+
+![image-20220215163511621](photo/59、非公平锁流程03(7).png) 
+
+此时，线程A已经释放资源，而线程B还没有获取到资源时，线程C进入，检查 `state` 之后直接获取资源，进行插队操作，而线程B发现资源无法获取继续在队列中进入阻塞状态。
+
+![image-20220215163709493](photo/60、非公平锁流程04(7).png) 
+
+##### 源码解析
+
+###### ReentrantLock 公平锁与非公平锁
+
+首先，在实例化 `ReentrantLock` 对象时可以通过传参指定公平锁或非公平锁。
+
+```java
+public ReentrantLock() {
+    sync = new NonfairSync();
+}
+
+public ReentrantLock(boolean fair) {
+    sync = fair ? new FairSync() : new NonfairSync();
+}
+```
+
+默认实例化的是非公平锁，可以通过传 `boolean` 值来判断是否为公平锁。
+
+我们先看公平锁 `FairSync` 类，此类是 `ReentrantLock` 中的一个静态内部类，非公平锁 `NonfairSync` 也是如此。其继承了 `Sync` 对象，下图是这些类的继承关系。
+
+![image-20220215092252307](photo/56、ReentrantLock继承关系(7).png) 
+
+可以看到本质获取资源等方法是调用了 `AQS` 类中已经定义好的方法，在 `FairSync` 和 `NonfairSync` 只是定义了 `AQS` 类中没有实现的方法。
+
+**公平锁** 
+
+首先先查看一下公平锁的 `lock` 方法，`ReentrantLock` 的获取锁操作就是 `lock` 方法。
+
+```java
+final void lock() { tes
+    acquire(1);
+}
+```
+
+`lock` 方法中调用了 `AQS` 类中的 `acquire` 方法，此方法在之前已经分析过，详见：[acquire方法](# acquire(int)方法详解) 。其中首先调用了 `tryAcquire` 方法，用于尝试获取资源，`tryAcquire` 方法的具体实现就在 `FairSync` 方法中。
+
+```java
+protected final boolean tryAcquire(int acquires) {
+    final Thread current = Thread.currentThread(); // 获取当前线程对象
+    int c = getState(); // 获取state的值
+    if (c == 0) { // 可以获取到资源
+        // 查看队列中是否有等待的线程，如果没有等待线程直接获取资源
+        if (!hasQueuedPredecessors() &&
+            // 修改state的值，获取资源
+            compareAndSetState(0, acquires)) {
+            // 将当前线程设置为拥有资源的线程
+            setExclusiveOwnerThread(current);
+            return true;
+        }
+    }
+    else if (current == getExclusiveOwnerThread()) { // 拥有资源的线程就是当前线程
+        // 此处的方法是实现锁的可重入，当一个线程多次获取资源时state将自增
+        int nextc = c + acquires;
+        // int溢出之后会变成负值，所以需要判断是否溢出
+        if (nextc < 0)
+            throw new Error("Maximum lock count exceeded");
+        // 设置state
+        setState(nextc);
+        return true;
+    }
+    // 无法获取到资源，或者可以获取资源但有等待的线程
+    return false;
+}
+```
+
+公平锁的 `tryAcquire` 方法中，无论是否可以获取资源，只要线程中有等待的线程就会返回 `false` 。并由之后的 `addWaiter` 方法和 `acquireQueued` 方法，将线程加入队列并阻塞等待唤醒。
+
+**非公平锁** 
+
+非公平锁的 `tryAcquire` 方法调用了 `Sync` 类中的 `nonfairTryAcquire` 方法来实现。
+
+```java
+final boolean nonfairTryAcquire(int acquires) {
+    final Thread current = Thread.currentThread(); // 获取当前线程
+    int c = getState(); // 获取state资源值
+    if (c == 0) { // 可以获取到资源
+        // 直接获取资源
+        if (compareAndSetState(0, acquires)) {
+            // 设置拥有资源线程为当前线程
+            setExclusiveOwnerThread(current);
+            return true;
+        }
+    }
+    // 可重入设计，与公平锁相同
+    else if (current == getExclusiveOwnerThread()) {
+        int nextc = c + acquires;
+        if (nextc < 0) // overflow
+            throw new Error("Maximum lock count exceeded");
+        setState(nextc);
+        return true;
+    }
+    // 未获取到资源，之后进入等待队列
+    return false;
+}
+```
+
+非公平锁与公平锁的区别就是在 `state` 为0时，公平锁会检查队列中是否存在等待的线程，而非公平锁则不会这样做，直接插队尝试去获取资源。
+
+> 可重入锁：即可以对资源多次加锁，可以在 `tryAcquire` 方法中看到，即是对 `state` 进行自增操作。同时，在释放锁时也需要多次释放，因为 `state` 不为0，则其他线程无法获取到锁。
+
+由上面的介绍可以得出，使用公平锁所有的线程都会按照先来先得的顺序依次获取到资源，没有线程会一直获取不到资源处于阻塞，但是线程的唤醒操作是比较消耗性能的，因此在线程数较多的情况下会因为不停的唤醒线程导致性能和吞吐量下降。非公平锁可以进行插队操作，在一个线程释放锁时另一个线程刚好进入，此时新进入的线程会直接去获取锁。由此减少了唤醒的消耗，同时也增加了吞吐量，但是在不断有新线程进入的情况下，队列中的线程有可能长时间无法获取锁而导致其一直处于阻塞状态。
 
 
 
