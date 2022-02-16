@@ -662,6 +662,8 @@ public class com.mochen.advance.juc.sync.SyncTestClass {
 
 > `synchronized` 无法解决有序性，无法阻止指令重排序。
 
+在 `JDK1.5` 之前的 `synchronized` 默认为重量级锁，在之后的版本优化之后，`synchronized` 锁可以根据情况不断升级，直至成为重量级锁。详见 [无锁 偏向锁 轻量级锁 重量级锁](# 无锁 偏向锁 轻量级锁 重量级锁) 
+
 #### Volatile 
 
 上面使用 `synchronized` 关键字也可以解决资源的可见性，但是使用锁对性能损耗过大。当一个线程获取锁之后，其他线程必须等待其释放锁，这样的解决方案太过于笨重。所以，`synchronized` 通常也被称作重量级锁。
@@ -943,23 +945,23 @@ public class AtomicTestClass implements BasicLogger {
 
 ### AQS
 
-`AQS` 全称 `AbstractQueuedSynchronizer` （抽象队列同步器），`AQS` 定义了一套多线程访问共享资源的同步器框架，许多同步类实现都基于 `AQS` 的理念，例如 `ReentrantLock` 等。
-
 #### 概述
 
-**`CLH` 队列锁** 
+**CLH 队列锁** 
 
 `CLH` 锁是有由 `Craig` ,  `Landin` ,  `Hagersten` 这三个人发明的锁，取了三个人名字的首字母，所以叫 `CLH` 锁。
 
-`CLH` 队列锁也是一种基于**双向链表**的可扩展、高性能、公平的自旋锁，申请线程仅仅在本地变量上自旋，它不断轮询前驱的状态，发现前驱释放了锁就结束自旋。
+`CLH` 队列锁也是一种基于**双向链表**的可扩展、高性能、公平的自旋锁，申请线程仅仅在本地变量上自旋，它不断轮询前驱的状态，发现前驱释放了锁就结束自旋。而 `AQS` 则是 `CLH` 的变体，在 `CLH` 的基础上进行了优化，并将自旋锁修改为了阻塞锁。
 
-`AQS` 类只是一个框架，展示了队列锁的设计方法。其中使用一个 `volatile int state` 来表示共享资源，多线程通过争抢此资源阻塞时进入队列来实现队列锁的效果。
+**AQS 类** 
 
-其中，关于 `sate` 变量的修改都是使用 `CAS` 的方式，从而保证其在多线程下的安全性。
+`AQS` 全称 `AbstractQueuedSynchronizer` （抽象队列同步器），`AQS` 定义了一套多线程访问共享资源的同步器框架，许多同步类实现都基于 `AQS` 的理念，例如 `ReentrantLock` 等。
+
+`AQS` 类只是一个框架，展示了队列锁的设计方法。其中使用一个 `volatile int state` 来表示共享资源，多线程通过争抢此资源阻塞时进入队列来实现队列锁的效果。其中，关于 `sate` 变量的修改都是使用 `CAS` 的方式，从而保证其在多线程下的安全性。
 
 #### 源码详解
 
-##### waitStatus属性
+##### waitStatus 属性
 
 ```java
 volatile int waitStatus;
@@ -986,7 +988,7 @@ static final int PROPAGATE = -3;
 
 > 负值为节点处于有效状态，正值则表示节点已经取消。
 
-##### Node类中其他属性
+##### Node 类中其他属性
 
 ```java
 volatile Node prev; // 上一个node
@@ -998,7 +1000,7 @@ volatile Thread thread; // 当前节点储存的线程，实例化Node时传入�
 
 ![image-20220125095028713](photo/45、CLH队列Node图示1(7).png)
 
-##### AQS中的head和tail属性
+##### AQS 中的 head 和 tail 属性
 
 ```java
 private transient volatile Node head; // 指向线程链表的第一个node
@@ -1007,7 +1009,7 @@ private transient volatile Node tail; // 指向线程链表的最后一个node
 
 ![image-20220125104832047](photo/46、CLH队列Node图示2(7).png)
 
-##### acquire(int)方法详解
+##### acquire(int) 方法详解
 
 ```java
 public final void acquire(int arg) {
@@ -1019,7 +1021,7 @@ public final void acquire(int arg) {
 
 在独占模式下获取资源，若获取到资源直接返回线程，否则进入等待队列直到获取到资源后为止，整个过程忽略中断的影响。
 
-###### tryAcquire方法
+###### tryAcquire 方法
 
 
 ```java
@@ -1035,7 +1037,7 @@ protected boolean tryAcquire(int arg) {
 >
 > 因为独占模式只需要实现 `tryAcquire` `tryRelease` ，共享模式只需要实现 `tryAcquireShared` `tryReleaseShared` ，如果定义为抽象类每个模式都需要去实现另一个模式下的接口，所以为了避免一些不必要的代码所以定义为一个普通类。
 
-###### addWaiter方法
+###### addWaiter 方法
 
 
 ```java
@@ -1057,7 +1059,7 @@ private Node addWaiter(Node mode) {
 
 将当前的线程加入等待队列的末尾，并返回当前线程生产的节点。传入的 `mode` 是一个空值，表示当前的模式为独占模式，在此方法中 `Node` 类中的 `nextWaiter` 参数会等于空。
 
-###### enq方法
+###### enq 方法
 
 ```java
 private Node enq(final Node node) {
@@ -1079,7 +1081,7 @@ private Node enq(final Node node) {
 
 自旋循环，若 `tail` 指向的尾部为空时，将头和尾都设置为同一个空的 `node` ，若 `tail` 指向的 `node` 不为空，则执行与 `addWaiter` 中添加节点相同的代码进行添加，最后返回当前的 `node` 。
 
-###### acquireQueued方法
+###### acquireQueued 方法
 
 
 ```java
@@ -1114,7 +1116,7 @@ final boolean acquireQueued(final Node node, int arg) {
    1. 获取成功，将 `head` 指向此节点，并返回线程是否存在中断。
    2. 获取失败，继续循环执行阻塞，等待唤醒。
 
-###### shouldParkAfterFailedAcquire方法
+###### shouldParkAfterFailedAcquire 方法
 
 ```java
 private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
@@ -1136,7 +1138,7 @@ private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
 
 如果上一个节点的状态不为 `SIGNAL` ，则会将上一级节点修改为 `SIGNAL` 。如果上一级节点状态为已取消，则会将节点删除到非取消状态的节点。
 
-`parkAndCheckInterrupt` 方法：
+###### parkAndCheckInterrupt 方法
 
 ```java
 private final boolean parkAndCheckInterrupt() {
@@ -1149,7 +1151,7 @@ private final boolean parkAndCheckInterrupt() {
 
 > 需要注意的是， `Thread.interrupted()` 会清除当前线程的中断标记位，若中断的线程在第一调用时返回 `true` 在第二次调用时则会返回 `false` 。
 
-###### cancelAcquire方法
+###### cancelAcquire 方法
 
 ```java
 private void cancelAcquire(Node node) {
@@ -1192,7 +1194,7 @@ private void cancelAcquire(Node node) {
 
 此方法用于取消删除自旋锁非正常结束且没有正常获取到资源的节点，并清除传入节点之前所有为已取消状态的节点。
 
-###### unparkSuccessor方法
+###### unparkSuccessor 方法
 
 ```java
 private void unparkSuccessor(Node node) {
@@ -1216,7 +1218,7 @@ private void unparkSuccessor(Node node) {
 }
 ```
 
-###### 总结acquire方法
+###### 总结 acquire 方法
 
 1. 使用 `tryAcquire` 尝试获取资源，若获取到直接返回。
 2. 使用 `addWaiter` 方法将当前线程包装为节点加入等待队列中，并标记为独占模式。
@@ -1229,7 +1231,7 @@ private void unparkSuccessor(Node node) {
 
 ![image-20220125172503874](photo/47、acquire方法流程图(7).png)
 
-##### release方法
+##### release 方法
 
 此方法时独占模式下线程释放共享资源的方法，他会释放指定量的资源彻底释放则将 `state=0` ，并唤醒等待队列中的其他线程来获取资源。
 
@@ -1247,7 +1249,7 @@ public final boolean release(int arg) {
 
 > 此方法是使用返回来确定该线程是否已经完成对资源的释放。
 
-###### tryRelease方法
+###### tryRelease 方法
 
 尝试释放资源，需要自定义同步器来实现，一般情况下此线程都会成功释放资源，因为在执行 `release` 方法时线程已经获取到了资源。
 
@@ -1257,7 +1259,7 @@ protected boolean tryRelease(int arg) {
 }
 ```
 
-###### unparkSuccessor方法
+###### unparkSuccessor 方法
 
 ```java
 private void unparkSuccessor(Node node) {
@@ -1280,7 +1282,7 @@ private void unparkSuccessor(Node node) {
 
 在此方法正常执行后，唤醒的节点就会继续执行 [acquireQueued方法](# acquireQueued方法) ，此时当唤醒的线程是队列中的第二个线程时，`acquireQueued` 方法中的获取资源和将唤醒的节点置为 `head` 的操作就会执行。若是从后到前查找并唤醒的节点不为当前队列的第二个节点时，唤醒的线程就会在 `parkAndCheckInterrupt` 方法处继续阻塞。
 
-##### acquireShared(int)方法
+##### acquireShared(int) 方法
 
 `acquireShared` 方法和独享模式的 `acquire` 方法流程基本相同，唯一不同的是当前资源已经被之前线程使用一部分后剩下的资源依旧足够下一个线程使用，则会唤醒下一个线程。这也是独享模式和共享模式最大个区别，独享模式同时只有 `head` 的线程在运行，而共享模式可能会同时运行多个线程。
 
@@ -1293,7 +1295,7 @@ public final void acquireShared(int arg) {
 
 第一步依旧是尝试获取资源，不过与独显模式不同的是 `tryAcquireShared` 方法返回的是一个 `int` 值。负数表示获取资源失败，0表示获取成功但是没有多余的资源，正数表示获取成功并且有剩余的资源其他线程还可以获取资源。第二步则是线程获取资源失败后将线程加入等待队列。
 
-###### tryAcquireShared方法
+###### tryAcquireShared 方法
 
 以共享模式获取资源的方法依旧是需要自定义同步器去实现。
 
@@ -1303,7 +1305,7 @@ protected int tryAcquireShared(int arg) {
 }
 ```
 
-###### doAcquireShared方法
+###### doAcquireShared 方法
 
 此方法用于等待和被唤醒后获取资源。
 
@@ -1341,7 +1343,7 @@ private void doAcquireShared(int arg) {
 
 使用自旋保证每一次被唤醒后都检查节点状态，当节点为第二个节点时尝试去获取资源，若不满足条件会清除无效节点继续进入阻塞等待状态以便下一次唤醒，当自旋时非正常结束且没有正常获取到资源时，则会将本节点及之前的无效节点全部删除。
 
-###### setHeadAndPropagate方法
+###### setHeadAndPropagate 方法
 
 此方法用于设置head指向的节点，在资源还有剩余时唤醒下一个节点
 
@@ -1362,7 +1364,7 @@ private void setHeadAndPropagate(Node node, int propagate) {
 
 首先先将传入的节点设置为头结点，并删除其中保存的线程和上一个 `node` 引用删除，并检查剩余资源唤醒下一节点。
 
-##### releaseShared方法
+##### releaseShared 方法
 
 释放线程占用的资源，其中的 `tryReleaseShared` 方法依旧需要具体实现类来实现。
 
@@ -1376,7 +1378,7 @@ public final boolean releaseShared(int arg) {
 }
 ```
 
-###### doReleaseShared方法
+###### doReleaseShared 方法
 
 此方法用于释放共享资源。
 
@@ -1405,6 +1407,10 @@ private void doReleaseShared() {
 ```
 
 获取到 `head` 当状态满足时间队列中后继节点唤醒
+
+#### 架构图
+
+![AQS架构图解](photo/61、AQS架构图解(7).png) 
 
 #### ReentrantLock
 
@@ -1489,7 +1495,7 @@ public ReentrantLock(boolean fair) {
 首先先查看一下公平锁的 `lock` 方法，`ReentrantLock` 的获取锁操作就是 `lock` 方法。
 
 ```java
-final void lock() { tes
+final void lock() {
     acquire(1);
 }
 ```
@@ -1529,7 +1535,18 @@ protected final boolean tryAcquire(int acquires) {
 
 **非公平锁** 
 
-非公平锁的 `tryAcquire` 方法调用了 `Sync` 类中的 `nonfairTryAcquire` 方法来实现。
+查看非公平锁中的 `lock` 方法。
+
+```java
+final void lock() {
+    if (compareAndSetState(0, 1))
+        setExclusiveOwnerThread(Thread.currentThread());
+    else
+        acquire(1);
+}
+```
+
+进入 `lock` 就会首先获取一次资源，若无法获取才会执行 `AQS` 的 `acquire` 方法，在其中调用 `tryAcquire` 方法实现功能。非公平锁的 `tryAcquire` 方法调用了 `Sync` 类中的 `nonfairTryAcquire` 方法来实现。
 
 ```java
 final boolean nonfairTryAcquire(int acquires) {
@@ -1562,8 +1579,325 @@ final boolean nonfairTryAcquire(int acquires) {
 
 由上面的介绍可以得出，使用公平锁所有的线程都会按照先来先得的顺序依次获取到资源，没有线程会一直获取不到资源处于阻塞，但是线程的唤醒操作是比较消耗性能的，因此在线程数较多的情况下会因为不停的唤醒线程导致性能和吞吐量下降。非公平锁可以进行插队操作，在一个线程释放锁时另一个线程刚好进入，此时新进入的线程会直接去获取锁。由此减少了唤醒的消耗，同时也增加了吞吐量，但是在不断有新线程进入的情况下，队列中的线程有可能长时间无法获取锁而导致其一直处于阻塞状态。
 
+###### 解锁操作
+
+`ReentrantLock` 中解锁操作使用 `unlock` 方法，查看 `unlock` 方法。
+
+```java
+public void unlock() {
+    sync.release(1);
+}
+```
+
+`unlock` 方法调用了 `Sync` 对象的 `release` 方法，其实也就是调用了 `AQS` 对象的 `release` 方法。
+
+```java
+public final boolean release(int arg) {
+    if (tryRelease(arg)) {
+        Node h = head;
+        if (h != null && h.waitStatus != 0)
+            unparkSuccessor(h);
+        return true;
+    }
+    return false;
+}
+```
+
+在 `release` 方法中调用了 `Sync` 真正实现的 `tryRelease` 方法。
+
+```java
+protected final boolean tryRelease(int releases) {
+    int c = getState() - releases; // 减去要释放的次数
+    // 若在解锁时，当前线程不是拥有资源的线程，则会抛出错误
+    if (Thread.currentThread() != getExclusiveOwnerThread())
+        throw new IllegalMonitorStateException();
+    boolean free = false; // state是否归零，即真正解锁
+    if (c == 0) { // state为0，即为解锁
+        free = true;
+        // 将储存的拥有资源的线程删除
+        setExclusiveOwnerThread(null);
+    }
+    // 设置state的值。
+    setState(c);
+    return free;
+}
+```
+
+首先减去需要释放的数量得出需要设置的剩余的值，再检测当前线程是否为拥有资源的线程，最后判断是否解锁并设置 `state` 的值。在设置值时并没有使用 `CAS` 方法，因为此时进入此方法可以执行到 `setState` 方法的只可能是当前拥有资源的线程，因此没有必要使用 `CAS` 方法。
+
+#### ReentrantReadWriteLock
+
+##### 概述
+
+上面介绍的 `ReentrantLock` 是独享锁的一种，而 `ReentrantReadWriteLock` 则是包含共享锁与独享锁。独享锁与共享锁的区别是，独享锁是排它锁一个线程获取资源，其他线程就需要等待。而共享锁的资源可以被多个线程同时持有，且共享锁的线程只能读数据不能修改数据。
+
+共享锁的场景是针对读写操作的，当一个资源读操作比较频繁而写操作较少时，在读数据时应该使用共享锁，多个线程可以同时读取数据。当在写操作时应该使用排它锁，同时只可以有一个线程进行写操作。
+
+在 `ReentrantReadWriteLock` 锁中有两个锁，一个是读锁（共享锁），一个是写锁（排它锁）。
+
+**类继承图** 
+
+![image-20220216171917560](photo/62、ReentrantReadWriteLock继承关系(7).png) 
+
+##### 解析
 
 
+
+#### 实现锁
+
+```java
+public class MyLock {
+
+    private final Sync sync;
+
+    static class Sync extends AbstractQueuedSynchronizer{
+
+        @Override
+        protected boolean tryAcquire(int arg) {
+            Thread thread = Thread.currentThread();
+            int s = getState();
+            if (s == 0){
+                if (compareAndSetState(0, arg)){
+                    setExclusiveOwnerThread(thread);
+                    return true;
+                }
+            }else if (getExclusiveOwnerThread() == thread){
+                int c = getState() + arg;
+                if (c < 0){
+                    throw new Error("state超过最大值，已溢出");
+                }
+                setState(c);
+                return true;
+            }
+            return false;
+        }
+
+        @Override
+        protected boolean tryRelease(int arg) {
+            Thread thread = Thread.currentThread();
+            int c = getState() - arg;
+            if (getExclusiveOwnerThread() != thread){
+                throw new IllegalMonitorStateException("不可用未持有锁的线程释放资源");
+            }
+            boolean result = false;
+            if (c == 0){
+                result = true;
+                setExclusiveOwnerThread(null);
+            }
+            setState(c);
+            return result;
+        }
+    }
+
+    public MyLock(){
+        sync = new Sync();
+    }
+
+    public void lock(){
+        sync.acquire(1);
+    }
+
+    public void unlock(){
+        sync.release(1);
+    }
+
+}
+```
+
+
+
+### 自旋锁
+
+#### 概述
+
+自旋锁的出现是因为在不同锁的阻塞和唤醒操作，是由系统底层切换 `cpu` 状态来实现的，而这种状态的转换是十分耗费时间的。当在锁定时间非常短的操作中（即在锁定代码中只执行了非常少的操作），在多线程不断切换的过程中会出现很大的资源浪费。
+
+自旋锁即为让线程执行一个空循环，让其处于“等待”而非“阻塞”状态，减少 `cpu` 状态的切换从而得到更好的性能。当然，自旋锁本身也有很大的缺陷，一旦当锁定代码操作较多时，由于自旋锁并没有放弃 `cpu` 时间，也会造成处理器资源被浪费。`JVM`  提供了一个参数来配置自旋的次数，若一直无法获取锁，则会依旧将线程挂起。
+
+```
+-XX:PreBlockSpin
+```
+
+> 自旋锁在 `JDK1.4.2` 中引入，使用 ``-XX:+UseSpinning` 来开启。`JDK 6` 中变为默认开启，并且引入了自适应的自旋锁（适应性自旋锁）。
+
+#### 实现
+
+自旋锁有三种实现方式 `TicketLock` `CLHLock` `MCSLock` 。
+
+##### TicketLock
+
+`TicketLock` 是公平锁，每当线程获取锁时，该线程就会被分配一个排队号。`TicketLock` 内部有一个服务号，每当线程释放锁时，服务号就会递增。排队号与服务号一一对应，排队号与服务号相同的线程可以获取到锁。
+
+```java
+import java.util.concurrent.atomic.AtomicInteger;
+
+public class TicketLock {
+    //当前服务号
+    private AtomicInteger serviceNum = new AtomicInteger();
+    //每个线程lock时自增，并设置到线程的ThreadLocal中
+    private AtomicInteger ticketNum  = new AtomicInteger();
+    //用于保存每个线程的票号
+    private static final ThreadLocal<Integer> LOCAL = new ThreadLocal<Integer>();
+
+    //获取TicketLock的流程如下：
+    //1、线程进入lock方法，原子地获取当前加1的票号
+    //2、将票号设置到本地线程ThreadLocal中
+    //3、自旋比较本地线程的票号是否和当前服务号，直至相等为止
+    public void lock() {
+        int myticket = ticketNum.getAndIncrement();
+        LOCAL.set(myticket);
+        //如果线程持有的票号和当前的服务号不相等就自旋等待
+        while (myticket != serviceNum.get()) {}
+    }
+    
+    public void unlock() {
+        int myticket = LOCAL.get();
+        //释放锁，将服务号加1
+        serviceNum.compareAndSet(myticket, myticket + 1);
+    }
+}
+```
+
+**TicketLock的缺点**：每次都要读写一个serviceNum服务号，并且还要保证读写操作在多个处理器缓存之间进行同步，这样会增加系统压力，影响性能。
+
+##### CLHLock
+
+CLHLock采用链表的形式进行排序，有如下好处：
+
+- 公平，FIFO，先来后到的顺序进入锁
+- 没有竞争同一个变量，因为每个线程都是在等待前继释放锁
+
+```java
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+
+public class CLHLock {
+    public static class CLHNode {
+        private volatile boolean isLocked = true;
+    }
+
+    @SuppressWarnings("unused")
+    private volatile CLHNode tail;
+    //每个线程私有的，用于保存每个线程所对应的CLHNode节点
+    private static final ThreadLocal<CLHNode> LOCAL = new ThreadLocal<CLHNode>();
+    //用于原子地更新CLHLock中的tail字段
+    private static final AtomicReferenceFieldUpdater<CLHLock, CLHNode> UPDATER = 						AtomicReferenceFieldUpdater.newUpdater(CLHLock.class, CLHNode.class, "tail");
+
+    //获取CLHLock锁的过程：
+    //1、新建CLHNode节点并设置到当前线程的ThreadLocal中
+    //2、原子地更新tail字段并获得前置节点
+    //3、自旋判断前置节点是否释放锁
+    public void lock() {
+        CLHNode node = new CLHNode();
+        LOCAL.set(node);
+        CLHNode preNode = UPDATER.getAndSet(this, node);
+        if (preNode != null) {
+            while (preNode.isLocked) {
+            }
+            //用于GC
+            preNode = null;
+            LOCAL.set(node);
+        }
+    }
+
+    public void unlock() {
+        CLHNode node = LOCAL.get();
+        if (!UPDATER.compareAndSet(this, node, null)) {
+            node.isLocked = false;
+        }
+        //用于GC
+        node = null;
+    }
+}
+```
+
+CLHLock是不停的查询前驱变量， 导致不适合在**NUMA** 架构下使用（在这种结构下，每个线程分布在不同的物理内存区域）
+
+非统一内存访问架构 `Non-uniform memory access` ，简称 `NUMA` 是一种为多处理器的计算机设计的内存架构，内存访问时间取决于内存相对于处理器的位置。在 `NUMA` 下，处理器访问它自己的本地内存的速度比非本地内存（内存位于另一个处理器，或者是处理器之间共享的内存）快一些。
+
+非统一内存访问架构的特点是：被共享的内存物理上是分布式的，所有这些内存的集合就是全局地址空间。所以处理器访问这些内存的时间是不一样的，显然访问本地内存的速度要比访问全局共享内存或远程访问外地内存要快些。另外， `NUMA` 中内存可能是分层的：本地内存，群内共享内存，全局共享内存。
+
+##### MCSLock
+
+`MCSLock` 则是对本地变量的节点进行循环。不存在 `CLHlock` 的问题。
+
+```java
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+
+public class MCSLock {
+    public static class MCSNode {
+        volatile MCSNode next;
+        volatile boolean isLocked = true;
+    }
+
+    private static final ThreadLocal<MCSNode> NODE = new ThreadLocal<MCSNode>();
+    @SuppressWarnings("unused")
+    private volatile MCSNode queue;
+    private static final AtomicReferenceFieldUpdater<MCSLock, MCSNode> UPDATER = 						AtomicReferenceFieldUpdater.newUpdater(MCSLock.class, MCSNode.class, "queue");
+
+    //获取MCSLock锁的过程：
+    //1、新建MCSNode节点并设置到当前线程的ThreadLocal中
+    //2、原子地更新queue字段并获得前置节点
+    //3、设置前置节点的next为当前节点
+    //4、自旋判断当前节点是否释放锁
+    public void lock() {
+        MCSNode currentNode = new MCSNode();
+        NODE.set(currentNode);
+        MCSNode preNode = UPDATER.getAndSet(this, currentNode);
+        if (preNode != null) {
+            preNode.next = currentNode;
+            while (currentNode.isLocked) {
+            }
+        }
+    }
+    
+    public void unlock() {
+        MCSNode currentNode = NODE.get();
+        if (currentNode.next == null) {
+            if (UPDATER.compareAndSet(this, currentNode, null)) {
+
+            } else {
+                while (currentNode.next == null) {
+                }
+            }
+        } else {
+            currentNode.next.isLocked = false;
+            currentNode.next = null;
+        }
+    }
+}
+```
+
+`CLHLock` 和 `MSCLock` 
+
+- `CLH` 的队列是隐式的队列，没有真实的后继结点属性。
+- `MCS` 的队列是显式的队列，有真实的后继结点属性。
+- 线程状态借助节点保存，每个线程都有一份独有的节点，这样就解决了 `TicketLock` 多处理器下的问题。
+
+### 锁的种类
+
+#### 乐观锁与悲观锁
+
+悲观锁认为在自己使用资源时，一定会有其他线程来修改资源。因此悲观锁会在使用资源时独占资源，避免资源被其他的线程修改。在 `java` 中，`synchronized` 关键字和相关的 `Lock` 类都是悲观锁。
+
+乐观锁认为在其使用资源时，不会有其他的线程来修改数据，所以在其使用资源时并不会加锁。只有在更新资源时会检查资源是否被其他的线程所修改，若资源已经被更新乐观锁会根据实现方式报错或者重试。在 `java` 中，`CAS` 就是典型的乐观锁。
+
+#### 自旋锁与适应性自旋锁
+
+自旋锁详见 [自旋锁概述](# 自旋锁) 
+
+适应性自旋锁与普通自旋锁的区别则是自旋的次数不再固定，会由上一次或者同一个锁的自旋时间及锁拥有者的状态类决定。如果在同一个锁对象上，自旋等待刚刚成功获得过锁，并且持有锁的线程正在运行中，那么虚拟机就会认为这次自旋也是很有可能再次成功，进而它将允许自旋等待持续相对更长的时间。如果对于某个锁，自旋很少成功获得过，那在以后尝试获取这个锁时将可能省略掉自旋过程，直接阻塞线程，避免浪费处理器资源。
+
+#### 无锁 偏向锁 轻量级锁 重量级锁
+
+==这四种锁涉及到JVM虚拟机内容等待补齐== 
+
+#### 公平锁与非公平锁
+
+详情查看：[公平锁与非公平锁](# 公平锁与非公平锁) 
+
+#### 可重入锁
+
+可重入锁有名递归锁，是指在同一线程下已经获取锁时，还可能继续获取锁，不会因为之前已经获取锁而阻塞。在 `java` 中 `ReentrantLock` 和 `synchronized` 都是可重入锁，其优点是可一定程度避免死锁。
 
 ## FutureTask
 
