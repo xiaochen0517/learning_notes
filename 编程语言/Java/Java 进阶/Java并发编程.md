@@ -1635,11 +1635,151 @@ protected final boolean tryRelease(int releases) {
 
 在 `ReentrantReadWriteLock` 锁中有两个锁，一个是读锁（共享锁），一个是写锁（排它锁）。
 
-**类继承图** 
+##### 解析
+
+###### 类继承图
 
 ![image-20220216171917560](photo/62、ReentrantReadWriteLock继承关系(7).png) 
 
-##### 解析
+在 `ReentrantReadWriteLock` 也分为公平锁与非公平锁，再次基础上锁变为两种类型：读锁与写锁。
+
+###### 读写切换
+
+在之前的设计中 `state` 只可以判断是否被线程获取到锁，但是在读写锁的需求下无法去区分到底是读锁或写锁。读写锁需要在一个整型变量及 `int` 变量上来进行读写锁的切换，`int` 型变量的长度是32位，将32位切割成两个 16位，高位表示读，低位表示写即可解决这个问题。
+
+那在获取读或者写锁的状态时，只需要将无用位抛弃即可。
+
+- 获取写状态：将前16擦除即可，使用按位与操作 `X&0x0000FFFF` ，将前16位全部置0。
+- 获取读状态：将后16擦除，使用移位操作，将前16位移到后16位，空位补0并忽略符号位 `X>>>16` 。
+- 写状态加1：直接加1即可 `X+1` 。
+- 读状态加1：读状态加一有两种方法，直接加第16为1的任意进制的数 `X+0x00010000` 或 `X+65536` ；第二种方法使用1向前位移16位后与值相加 `X+(1<<16)` ；这两种方法结果是相同的。
+
+```java
+static final int SHARED_SHIFT   = 16; // 位移的大小
+static final int SHARED_UNIT    = (1 << SHARED_SHIFT); // 读操作加的值
+static final int MAX_COUNT      = (1 << SHARED_SHIFT) - 1; // 分成16位之后最大的值
+static final int EXCLUSIVE_MASK = (1 << SHARED_SHIFT) - 1; // 获取写操作与运算的值，1位移16位后减一则变成，前16位0，后16位为1
+```
+
+如果 `X&0x0000FFFF` 大于0，则表示写锁被获取；若 `X>>>16` 大于0，则表示读锁被获取。
+
+###### 读写锁对比
+
+```java
+public static class WriteLock implements Lock, java.io.Serializable {
+    private final Sync sync;
+    // ....
+}
+
+public static class ReadLock implements Lock, java.io.Serializable {
+    private final Sync sync;
+    // ....
+}
+```
+
+写锁和读锁与 `ReentrantLock` 同样，实现了 `Lock` 接口。因为 `ReentrantReadWriteLock` 中有两个不同的锁，所以需要分别去实现，所以 `ReentrantReadWriteLock` 不会实现 `Lock` 接口，而是由具体的读锁和写锁的类来实现。
+
+```java
+// write lock
+public void lock() {
+    sync.acquire(1);
+}
+// read lock
+public void lock() {
+    sync.acquireShared(1);
+}
+```
+
+在写锁的 `lock` 方法中，直接调用了 `AQS` 的 `acquire` 方法，`acquire` 方法又调用 `Sync` 类中的 `tryAcquire` 方法。而读锁中调用的则是 `acquireShared` 方法，用来实现共享锁的功能。
+
+```java
+// write lock
+protected final boolean tryAcquire(int acquires) {
+    // 获取当前线程
+    Thread current = Thread.currentThread();
+    // 获取state值
+    int c = getState();
+    int w = exclusiveCount(c); // c&0x0000ffff 获取低16位内容
+    if (c != 0) {
+        // state不为0但是低16位为0，则读锁已被获取；或者当前线程不为拥有资源线程；
+        // (Note: if c != 0 and w == 0 then shared count != 0)
+        if (w == 0 || current != getExclusiveOwnerThread())
+            return false;
+        // 低16加自增的值大于16位可容纳的最大值，溢出报错
+        if (w + exclusiveCount(acquires) > MAX_COUNT)
+            throw new Error("Maximum lock count exceeded");
+        // 来到此处的线程必定是低16大于0且当前拥有资源线程为当前线程，可重入设计，直接加值即可
+        // 设置state低16位直接相加
+        setState(c + acquires);
+        return true;
+    }
+    // 公平锁：此方法检查队列中是否有等待的线程；非公平锁：直接返回false；
+    if (writerShouldBlock() ||
+        // 在获取资源的时候发生错误
+        !compareAndSetState(c, c + acquires))
+        return false;
+    // 此处排除了所有其他条件，state也修改完毕，直接将拥有资源的线程修改为当前线程即可
+    setExclusiveOwnerThread(current);
+    return true;
+}
+```
+
+
+
+```java
+// read lock
+protected final int tryAcquireShared(int unused) {
+    // 获取当前线程
+    Thread current = Thread.currentThread();
+    // 获取state
+    int c = getState();
+    // 低16位不为0且拥有资源的线程不为当前线程，返回-1
+    if (exclusiveCount(c) != 0 &&
+        getExclusiveOwnerThread() != current)
+        return -1;
+    // 获取读锁state值，高16位
+    int r = sharedCount(c);
+    /**
+     * 非公平锁：调用apparentlyFirstQueuedIsExclusive方法，队列中有等待的线程，且等待的线程
+     *		不是共享模式，及独占模式的写锁，返回true此读线程需要等待。
+     * 公平锁：线程中有等待的线程则当前读线程需要等待，返回true。
+     */
+    if (!readerShouldBlock() &&
+        // 当前的高16位小于最大值
+        r < MAX_COUNT &&
+        // 获取读锁
+        compareAndSetState(c, c + SHARED_UNIT)) {
+        // 若在之前的高16位为0，则表示当前线程是第一个读线程
+        if (r == 0) {
+            // 设置第一个读线程
+            firstReader = current;
+            // 初始化值
+            firstReaderHoldCount = 1;
+            // 第一个读线程和为当前线程
+        } else if (firstReader == current) {
+            // 可重入设计，直接自增
+            firstReaderHoldCount++;
+        } else { // 不是第一个获取读锁的线程
+            // 获取计数器
+            HoldCounter rh = cachedHoldCounter;
+            // 计数器为空或者计数器的tid不是当前相册好难过tid
+            if (rh == null || rh.tid != getThreadId(current))
+                // 将计数器的tid修改为当前线程tid
+                cachedHoldCounter = rh = readHolds.get();
+            // 计数器是当前线程，且计数器为0
+            else if (rh.count == 0)
+                // 待定，需要学习 ThreadLocal
+                readHolds.set(rh);
+            // 计数自增
+            rh.count++;
+        }
+        return 1;
+    }
+    return fullTryAcquireShared(current);
+}
+```
+
+
 
 
 
