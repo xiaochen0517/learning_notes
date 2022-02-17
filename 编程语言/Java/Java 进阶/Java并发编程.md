@@ -432,6 +432,95 @@ service.shutdown();
 
 `Callable` 和 `Runnable` 是不同的，而 `Thread` 中是无法传入 `Callable` 对象的，这时就需要用到一个新技术线程池，使用 `Executors` 新建一个线程池，最后使用线程池的 `submit` 方法传入 `Callable` 对象进行线程的创建和执行。关于线程池相关请查看[Java线程池](#线程池) 
 
+## ThreadLocal
+
+### 概述
+
+在单线程状态下，变量分为局部变量和全局变量，单线程状态下可以随意使用。但是在多线程状态下，局部变量是没有问题的，但使用全局变量就会引发[线程安全](# 线程安全)问题。所以 `JDK` 在 `java.lang` 包中提供了 `ThreadLocal` 用来解决这个问题，`ThreadLocal` 是一种介于全局变量和局部变量之间的变量。 `ThreadLocal` 可以为每个线程单独储存一个相同类的不同的实例，即每个线程设置和储存的对象都可以互不干扰，在需要的时候随时获取大大减少了方法之间显式的参数传递。
+
+![image-20220217093638572](photo/63、ThreadLocal结构图(7).png) 
+
+### 使用
+
+`ThreadLocal` 只需要在指定的线程中使用 `set` 方法和 `get` 方法即可设置和获取其中的对象，在线程执行结束时需要使用 `remove` 去移除 `ThreadLocal` 中的对象。
+
+```java
+public class ThreadLocalTestClass implements BasicLogger {
+
+    private static ThreadLocal<String> stl = new ThreadLocal<>();
+
+    public static void main(String[] args) {
+
+        for (int i = 0; i < 100; i++) {
+            int finalI = i;
+            new Thread(() -> {
+                try {
+                    stl.set("Test -- " + finalI);
+                    test1();
+                    test2();
+                } finally {
+                    stl.remove();
+                }
+            }).start();
+        }
+    }
+
+    public static void test1() {
+        String str = stl.get();
+        LOGGER.info("test1 method output content === {}", str);
+    }
+
+    public static void test2() {
+        String str = stl.get();
+        LOGGER.info("test2 method output content === {}", str);
+    }
+}
+```
+
+结果
+
+```
+test1 method output content === Test -- 2
+test1 method output content === Test -- 1
+test2 method output content === Test -- 1
+test1 method output content === Test -- 0
+test2 method output content === Test -- 0
+test2 method output content === Test -- 2
+```
+
+可以看到在同一线程执行的 `test1` 和 `test2` 方法输出的内容不同，不同线程获取到的 `String` 对象不是同一个。
+
+### 解析
+
+首先 `ThreadLocal` 是一个泛型类，保证可以接受任何类型的对象。
+
+因为一个线程内可以存在多个 `ThreadLocal` 对象，所以其实是 `ThreadLocal` 内部维护了一个 `Map` ，这个 `Map` 不是直接使用的 `HashMap` ，而是 `ThreadLocal` 实现的一个叫做 `ThreadLocalMap` 的静态内部类。而我们使用的 `get()`、`set()` 方法其实都是调用了这个 `ThreadLocalMap` 类对应的 `get()`、`set()` 方法。例如下面的 `set` 方法：
+
+```java
+public void set(T value) {
+    Thread t = Thread.currentThread();
+    ThreadLocalMap map = getMap(t);
+    if (map != null)
+        map.set(this, value);
+    else
+        createMap(t, value);
+}
+```
+
+调用 `ThreadLocal` 的 `set` 方法时，首先获取到了当前线程，然后获取当前线程维护的 `ThreadLocalMap` 对象，最后在`ThreadLocalMap` 实例中添加上。如果 `ThreadLocalMap` 实例不存在则初始化并赋初始值。
+
+这里看到 `set` 方法的第一个参数是 `this` ，`this`即指的是当前的 `ThreadLocal` 对象，会看上看的代码就是指的 `mLocal` 这个对象。而在 `ThreadLocalMap` 的 `set` 方法中会根据当前 `ThreadLocal` 对象实例，做一些操作和判断，最终实现赋值操作。
+
+所以说，最终的变量是放在了当前线程的 `ThreadLocalMap` 中，并不是存在 `ThreadLocal` 上，`ThreadLocal` 可以理解为只是一个中间工具，传递了变量值。
+
+#### 内存泄露问题
+
+实际上 `ThreadLocalMap` 中使用的 `key` 为 `ThreadLocal` 的弱引用，弱引用的特点是，如果这个对象只存在弱引用，那么在下一次垃圾回收的时候必然会被清理掉。
+
+所以如果 `ThreadLocal` 没有被外部强引用的情况下，在垃圾回收的时候会被清理掉的，这样一来 `ThreadLocalMap` 中使用这个 `ThreadLocal` 的 `key` 也会被清理掉。但是，`value` 是强引用，不会被清理，这样一来就会出现 `key` 为 `null` 的 `value`。
+
+`ThreadLocalMap` 实现中已经考虑了这种情况，在调用 `set()`、`get()`、`remove()` 方法的时候，会清理掉 `key` 为 `null` 的记录。如果说会出现内存泄漏，那只有在出现了 `key` 为 `null` 的记录后，没有手动调用 `remove()` 方法，并且之后也不再调用 `get()`、`set()`、`remove()` 方法的情况下。
+
 ## 线程安全及锁
 
 ### 线程安全
@@ -1727,6 +1816,19 @@ protected final boolean tryAcquire(int acquires) {
 
 
 ```java
+// 此对象继承了ThreadLocal并用于储存HoldCounter对象
+private transient ThreadLocalHoldCounter readHolds;
+// 用于在获取读锁时短暂缓存
+private transient HoldCounter cachedHoldCounter;
+// 第一个获取到资源的读锁
+private transient Thread firstReader = null;
+// 第一个获取到资源的读锁重入次数
+private transient int firstReaderHoldCount;
+```
+
+一些用于在获取读锁时使用的全局变量。
+
+```java
 // read lock
 protected final int tryAcquireShared(int unused) {
     // 获取当前线程
@@ -1740,9 +1842,9 @@ protected final int tryAcquireShared(int unused) {
     // 获取读锁state值，高16位
     int r = sharedCount(c);
     /**
-     * 非公平锁：调用apparentlyFirstQueuedIsExclusive方法，队列中有等待的线程，且等待的线程
-     *		不是共享模式，及独占模式的写锁，返回true此读线程需要等待。
-     * 公平锁：线程中有等待的线程则当前读线程需要等待，返回true。
+     * 非公平锁：调用apparentlyFirstQueuedIsExclusive方法，队列中head下一项有等待的线程，
+     *		且等待的线程不是共享模式，即独占模式的写锁，返回true此读线程需要等待。
+     * 公平锁：队列中有等待的线程则当前读线程需要等待，返回true。
      */
     if (!readerShouldBlock() &&
         // 当前的高16位小于最大值
@@ -1768,16 +1870,104 @@ protected final int tryAcquireShared(int unused) {
                 cachedHoldCounter = rh = readHolds.get();
             // 计数器是当前线程，且计数器为0
             else if (rh.count == 0)
-                // 待定，需要学习 ThreadLocal
+                // 将计数器设置为线程的变量
                 readHolds.set(rh);
             // 计数自增
             rh.count++;
         }
+        // 读锁获取到了资源
         return 1;
     }
+    // 队列中有内容，或大小超出，或获取读锁是失败
     return fullTryAcquireShared(current);
 }
 ```
+
+关于读锁的获取资源操作较写锁相对复杂，读锁可以获取到资源需要几个先决条件，首先不可以有写锁已经获取到资源正在运行、非公平锁等待队列中 `head` 下一个节点不可以是写线程，公平锁则等待队列中不可以有等待的线程，且获取资源后 `state` 的高16位不可以大于 `0xFFFF` 。读锁的复杂主要来源于可以多个线程同时获取读锁并执行，所以如果在单个读线程下，只需要在 `Sync` 类中添加一个计数器来判断一个读锁到底被获取了几次。但是在多个读线程的情况下，一个计数器就没有办法储存多个线程的状态，此时要使用到 `ThreadLocal` 来对不同的线程设置不同的计数器。下方代码是计数器对象：
+
+```java
+static final class HoldCounter {
+    int count = 0;
+    // Use id, not reference, to avoid garbage retention
+    final long tid = getThreadId(Thread.currentThread());
+}
+```
+
+其中储存了读线程重复获取读锁的次数，而 `tid` 则是储存线程的 `ThreadID` 。
+
+```java
+final int fullTryAcquireShared(Thread current) {
+    // 将计数器置空
+    HoldCounter rh = null;
+    for (;;) {
+        // 获取state
+        int c = getState();
+        // 判断低16位，写锁已被获取
+        if (exclusiveCount(c) != 0) {
+            if (getExclusiveOwnerThread() != current)
+                return -1;
+        // 与上一个方法相同
+        } else if (readerShouldBlock()) {
+            // 第一个读锁为当前线程，表示第一个读锁的计数大于0
+            if (firstReader == current) {
+                // assert firstReaderHoldCount > 0;
+            } else {
+                // 计数器为空
+                if (rh == null) {
+                    // 将缓存的计数器设置为当前计数器
+                    rh = cachedHoldCounter;
+                    // 计数器为空或者计数器tid不为当前线程
+                    if (rh == null || rh.tid != getThreadId(current)) {
+                        // 从ThreadLocal中获取到当前线程的计数器
+                        rh = readHolds.get();
+                        // 若计数为0则移除ThreadLocal中的计数器
+                        if (rh.count == 0)
+                            readHolds.remove();
+                    }
+                }
+                // 计数器为0返回-1，当前线程加入队列
+                if (rh.count == 0)
+                    return -1;
+            }
+        }
+        // 获取高16位大小已经是最大值，直接抛错
+        if (sharedCount(c) == MAX_COUNT)
+            throw new Error("Maximum lock count exceeded");
+        // 获取读锁
+        if (compareAndSetState(c, c + SHARED_UNIT)) {
+            // 若高16位为0
+            if (sharedCount(c) == 0) {
+                // 第一个读线程为当前线程
+                firstReader = current;
+                firstReaderHoldCount = 1;
+            // 当前线程为第一个读线程
+            } else if (firstReader == current) {
+                // 可重入设计，第一个读线程计数自增
+                firstReaderHoldCount++;
+            } else {
+                // 计数器为空
+                if (rh == null)
+                    // 赋值缓存计数器
+                    rh = cachedHoldCounter;
+                // 计数器为空或者计数器不是当前线程
+                if (rh == null || rh.tid != getThreadId(current))
+                    rh = readHolds.get();
+                else if (rh.count == 0)
+                    readHolds.set(rh);
+                // 计数器自增
+                rh.count++;
+                // 设置缓存计数器 
+                cachedHoldCounter = rh; // cache for release
+            }
+            return 1;
+        }
+    }
+}
+```
+
+流程图
+
+![](photo/64、读锁获取资源流程图(7).png) 
 
 
 
