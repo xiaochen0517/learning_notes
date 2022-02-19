@@ -1840,6 +1840,23 @@ private transient int firstReaderHoldCount;
 一些用于在获取读锁时使用的全局变量。
 
 ```java
+Sync() {
+    readHolds = new ThreadLocalHoldCounter();
+    setState(getState()); // ensures visibility of readHolds
+}
+
+// 在创建ThreadLocal时也创建好HoldCounter
+static final class ThreadLocalHoldCounter
+    extends ThreadLocal<HoldCounter> {
+    public HoldCounter initialValue() {
+        return new HoldCounter();
+    }
+}
+```
+
+在实例化 `Sync` 时会将线程的计数器创建好，此处的 `initialValue` 即是返回默认的初始值。
+
+```java
 // read lock
 protected final int tryAcquireShared(int unused) {
     // 获取当前线程
@@ -1989,9 +2006,21 @@ final int fullTryAcquireShared(Thread current) {
 首先看 `tryAcquireShared` 方法：
 
 1. 首先拿到当前线程和 `state` ，第一个判断用来判断是否已经有线程获取到了写锁，且写锁不是当前线程返回-1表示没法获取锁。为什么要判断是不是当前线程呢？这就要说到读写锁的另一个重点，写锁降级；
-2. 从 `state` 取高16位表示读锁的部分取名 `r` ，接下来的判断一共有三个方法，而 `&&` 符的特点是只有前面为 `true` 时才会执行之后的判断。第一个方法判断是否线程应该被阻塞，非公平锁时 [^1] ，公平锁时[^2] 。
+2. 从 `state` 取高16位表示读锁的部分取名 `r` ，接下来的判断一共有三个方法，而 `&&` 符的特点是只有前面为 `true` 时才会执行之后的判断。第一个方法判断是否线程应该被阻塞，非公平锁时 [^1] ，公平锁时[^2] 。返回 `true` 时直接执行 `fullTryAcquireShared` 方法，返回 `false` 紧接着执行下一个判断。
+3. 如果 `readerShouldBlock` 返回 `false` 才会执行接下来的方法，用于除错和获取锁。第二个用于判断高16位的值是否溢出，如果没有溢出则表示可以获取资源。第三个方法直接使用 `CAS` 操作修改读锁高16位的值，成功则进行下一步，不成功则直接执行 `fullTryAcquireShared` 方法。
+4. 此时，当前的线程已经获取到了读锁，紧接着就是一串 `if else` 判断。第一个 `r==0` ，此处使用的 `r` 还是在进行判断之前从成员变量中获取到的内容，这个 `r` 不会因为上一步的 `CAS` 操作而变化。那这个判断的意思就是，在获取读锁之前 `state` 的高16位为0，即当前的线程是第一个获取读锁的线程，设置 `firstReader` 和 `firstReaderHoldCount` 变量，后跳转到第10步。
+5. `if else` 的第二个判断 `firstReader==current` ，这个判断的前提是 `r` 之前已经不为0，若第一个获取读锁的线程就是当前线程时，则表示这是当前线程多次重入锁，直接自增 `firstReaderHoldCount` 的值，跳转到第10步。
+6. 最后的一个 `else` 分支，能到达此处的线程必定不是第一个获取读锁的线程，在当前线程获取读锁之前已经有线程也获取了读锁。此处需要表达的就是现在有多个线程都获取了读锁，单单只有一个储存第一个线程的变量和重入的次数已经无法需求，所以此处需要动用 `ThreadLocal` 来为每个线程单独储存计数器。
+7. 首先获取到缓存的计数器 `cachedHoldCounter` ，因为不能确定当前缓存中有没有值，所以在接下来的判断中，需要确保 `rh` 是当前的线程的计数器。首先 `rh` 为空或者 `rh` 中储存的 `tid` 不是当前线程的 `tid` ，则表示计数器需要重新从 `ThreadLocal` 中去获取，调用 `ThreadLocalHoldCounter` 对象的 `get` 方法获取到本线程的计数器并赋值给 `rh` 变量和缓存计数器变量，跳转到第9步。
+8. 当执行到 `else if` 步骤的线程，当前的缓存计数器及 `rh` 变量一定是当前线程的计数器，然后将计数器设置到 `ThreadLocal` 中。
+9. 最后将计数器中的 `count` 值自增。
+10. 返回 1，表示获取到了资源。
 
+接下来是 `fullTryAcquireShared` 方法：进入此方法的线程应该满足三个条件，读线程应该阻塞、读线程 `state` 不小于最大值并且 `CAS` 获取锁时失败。
 
+1. 首先第一部分有两种可能会直接返回-1，其实也是在排除没有条件去尝试获取锁的线程。一种是写锁已被获取并且获取写锁的不是当前线程，直接返回-1。另一种情况是当写锁没有被获取，且当前读线程应该阻塞（具体逻辑请看[^1] [^2] 的描述）且线程是第一次尝试获取锁（排除不是重入的情况），返回-1。
+2. 读锁的 `state` 大小检测，已满则抛出错误。
+3. 如果上面的条件都没有满足，其实现在这个线程有以下几种情况：已经获取写锁的线程、第一个已经获取读锁的线程在重入，不应该阻塞的读线程在第一次获取读锁，或者是已经获取读锁的线程在重入。上面的三种情况只要有一个可以满足，则表名线程是绝对可以获取锁的，因此在使用 `CAS` 尝试失败后需要返回第一步重新去判断。
 
 [^1]: 非公平锁：调用 `apparentlyFirstQueuedIsExclusive` 方法，队列中 `head` 下一项有等待的线程，且等待的线程不是共享模式，即独占模式的写锁，返回 `true` 此读线程需要等待。
 
