@@ -355,6 +355,18 @@ public final void checkAccess() {
 
 使用 `suspend` 挂起线程使用 `resume` 唤醒，由于此方法容易发生死锁，自 `jdk7` 已标记为弃用。
 
+#### Runnable 类
+
+`Runnable` 类本质没有任何操作，只是用来结合 `Thread` 类实现函数式接口。
+
+```java
+@FunctionalInterface
+public interface Runnable {
+    public abstract void run();
+}
+```
+
+
 #### Callable 类
 
 `Callable` 类和 `Runnable` 类一样是一个接口类，不同之处在于 `Callable` 的 `call` 方法拥有返回值，而 `Runnable` 的 `run` 方法没有返回值。
@@ -366,18 +378,273 @@ public interface Callable<V> {
 }
 ```
 
-#### Runnable 类
-
-`Runnable` 类：
+#### Future 类
 
 ```java
-@FunctionalInterface
-public interface Runnable {
-    public abstract void run();
+public interface Future<V> {
+	// 尝试取消此任务执行
+    boolean cancel(boolean mayInterruptIfRunning);
+	// 任务是否在完成前被取消
+    boolean isCancelled();
+	// 任务是否已经完成，此完成包括了正常中止、异常和取消。
+    boolean isDone();
+	// 等待任务完成并获取返回值
+    V get() throws InterruptedException, ExecutionException;
+	// 在指定的时间内等待任务完成并获取返回值，超时则取消等待
+    V get(long timeout, TimeUnit unit)
+        throws InterruptedException, ExecutionException, TimeoutException;
+}
+```
+
+`Future` 类也是一个接口类，其中定义了一系列操作线程及判断线程状态的方法。
+
+#### FutureTask 类
+
+`FutureTask` 类实现了 `RunnableFuture` 接口类，而 `RunnableFuture` 则同时继承了 `Runnable` 和 `Future` 类。
+
+```java
+public interface RunnableFuture<V> extends Runnable, Future<V> {
+    void run();
 }
 ```
 
 
+
+![image-20220120101305193](photo\36、FutureTask方法列表(7).png) 
+
+
+
+##### 解析源码
+
+###### 构造方法
+
+`FutureTask` 拥有两个构造方法，一个直接传入 `Callable` 对象，另一个传入 `Runnable` 对象和一个默认的返回值，因为 `FutureTask` 类默认是存在可以获取返回值的。
+
+```java
+public FutureTask(Callable<V> callable) {
+    if (callable == null)
+        throw new NullPointerException();
+    this.callable = callable;
+    this.state = NEW;       // ensure visibility of callable
+}
+
+public FutureTask(Runnable runnable, V result) {
+    this.callable = Executors.callable(runnable, result);
+    this.state = NEW;       // ensure visibility of callable
+}
+```
+
+在当传入的对象是 `Callable` 时，`FutureTask` 会直接将 `Callable` 赋值给属性。当传入的 `Runnable` 时会使用到线程池对象 `Executors` 的 `callable` 方法，将 `Runnable` 转换为 `Callable`。
+
+```java
+public static <T> Callable<T> callable(Runnable task, T result) {
+    if (task == null)
+        throw new NullPointerException();
+    return new RunnableAdapter<T>(task, result);
+}
+
+// RunnableAdapter
+static final class RunnableAdapter<T> implements Callable<T> {
+    final Runnable task;
+    final T result;
+    RunnableAdapter(Runnable task, T result) {
+        this.task = task;
+        this.result = result;
+    }
+    public T call() {
+        task.run();
+        return result;
+    }
+}
+```
+
+可以看到，`Runnable` 和 传入的返回值被传入到 `RunnableAdapter` 对象中，此对象实现 `Callable` 接口并在 `call` 方法中调用了 `Runnable` 的 `run` 方法，并将传入的返回值进行返回。至此，使用传入的 `Runnable` 对象和默认返回值转换为 `Callable` 对象。
+
+###### 对 Runnable 和 Callable的包装
+
+从下图可知，`FutureTask` 实现了 `RunnableFuture` 而 `RunnableFuture` 接口类继承了 `Runnable` 和 `Future` ，因此 `FutureTask` 本质上还是 `Runnable` ，所以可以直接传入 `Thread` 类中。
+
+![image-20220120112001460](photo\37、FutureTask继承结构图(7).png) 
+
+在 `FutureTask` 中的 `run` 方法最后还是执行的是 `Callable` 的 `call` 方法。
+
+![image-20220120170609195](photo\38、FutureTask包装任务类(7).png) 
+
+###### get 方法
+
+`FutureTask` 使用以下状态用来区分当前线程的状态
+
+```java
+private volatile int state;
+private static final int NEW          = 0;
+private static final int COMPLETING   = 1;
+private static final int NORMAL       = 2;
+private static final int EXCEPTIONAL  = 3;
+private static final int CANCELLED    = 4;
+private static final int INTERRUPTING = 5;
+private static final int INTERRUPTED  = 6; 
+```
+
+- `NEW` ：新建
+- `COMPLETING` ：即将完成，完成中，运行中
+- `NORMAL` ：完成
+- `EXECEPTIONAL` ：抛异常
+- `CANCELLED` ：任务取消
+- `INTERRRUPTING` ：任务即将被打断
+- `INTERRUPTED` ：任务被打断
+
+`get` 方法源码
+
+```java
+public V get() throws InterruptedException, ExecutionException {
+    int s = state; // 获取当前
+    if (s <= COMPLETING) // 状态为新建或即将完成
+        s = awaitDone(false, 0L);
+    return report(s);
+} 
+```
+
+`get` 方法会阻塞线程等待返回，阻塞部分的核心代码就是 `awaitDone` 方法。
+
+```java
+private int awaitDone(boolean timed, long nanos)
+    throws InterruptedException {
+    final long deadline = timed ? System.nanoTime() + nanos : 0L;
+    WaitNode q = null;
+    boolean queued = false;
+    for (;;) {
+        if (Thread.interrupted()) {
+            removeWaiter(q);
+            throw new InterruptedException();
+        }
+
+        int s = state;
+        if (s > COMPLETING) {
+            if (q != null)
+                q.thread = null;
+            return s;
+        }
+        else if (s == COMPLETING) // cannot time out yet
+            Thread.yield();
+        else if (q == null)
+            q = new WaitNode();
+        else if (!queued)
+            queued = UNSAFE.compareAndSwapObject(this, waitersOffset,
+                                                 q.next = waiters, q);
+        else if (timed) {
+            nanos = deadline - System.nanoTime();
+            if (nanos <= 0L) {
+                removeWaiter(q);
+                return state;
+            }
+            LockSupport.parkNanos(this, nanos);
+        }
+        else
+            LockSupport.park(this);
+    }
+} 
+```
+
+关于阻塞部分，方法中使用了 `LockSupport` 这是一个阻塞线程工具类，提供了多种方法用来阻塞及唤醒线程。
+
+
+##### 使用 FutureTask
+
+```java
+public static void main(String[] args) throws ExecutionException, InterruptedException, TimeoutException {
+    FutureTask<String> futureTask = new FutureTask<>(new Callable<String>() {
+        @Override
+        public String call() throws Exception {
+            LOGGER.info("start thread");
+            Thread.sleep(2000L);
+            return "This is result data";
+        }
+    });
+    new Thread(futureTask).start();
+    LOGGER.info("Mission Is Done : {}", futureTask.isDone());
+    String result = futureTask.get();
+    // String result = futureTask.get(1, TimeUnit.SECONDS); // 在指定的时间超时后会抛出 TimeoutException
+    LOGGER.info("Mission Is Done : {}", futureTask.isDone());
+    LOGGER.info("Result Data : {}", result);
+}
+```
+
+- 在实例化 `FutureTask` 时传入 `Callable` 对象
+- 将 `FutureTask` 对象传入 Thread 并执行线程
+- 使用 `isDone` 方法检查是否执行完成
+- 使用 `get` 方法获取到返回的内容
+
+> `get` 方法有两个重载方法，一个无参数另一个需要传入超时时间，超时后抛出 `TimeoutException` 异常。
+>
+> 在执行 `get` 方法时，主线程会被阻塞，知道获取到返回结果或者超时。
+
+#### LockSupport 类
+
+##### 概述
+
+`LockSupport` 类中的所有方法都是静态方法，且都是调用了 `Unsafe` 类的本地方法，这些阻塞操作等都是由系统执行的。
+
+
+```java
+// 暂停当前线程
+public static void park(Object blocker); 
+// 暂停当前线程，不过有超时时间的限制
+public static void parkNanos(Object blocker, long nanos); 
+// 暂停当前线程，直到某个时间
+public static void parkUntil(Object blocker, long deadline); 
+// 无期限暂停当前线程
+public static void park(); 
+// 暂停当前线程，不过有超时时间的限制
+public static void parkNanos(long nanos); 
+// 暂停当前线程，直到某个时间
+public static void parkUntil(long deadline); 
+// 恢复指定线程
+public static void unpark(Thread thread);
+```
+
+##### 使用
+
+```java
+public static void main(String[] args) throws InterruptedException {
+    List<Thread> threadList = new ArrayList<>();
+
+    for (int i = 0; i < 5; i ++){
+        int finalI = i;
+        Thread thread = new Thread(() -> {
+            LOGGER.info("启动线程：{}", finalI);
+            LockSupport.park();
+            LOGGER.info("线程恢复：{}", finalI);
+        });
+        thread.setName("线程--"+finalI);
+        thread.start();
+        threadList.add(thread);
+    }
+
+    Thread.sleep(2000L);
+    LOGGER.info("主线程恢复");
+    for (Thread thread : threadList) {
+        LockSupport.unpark(thread);
+    }
+}
+```
+
+结果
+
+```java
+2022-01-21 09:43:59.993 [线程--0] INFO  java.lang.Thread - 启动线程：0
+2022-01-21 09:43:59.993 [线程--2] INFO  java.lang.Thread - 启动线程：2
+2022-01-21 09:43:59.993 [线程--1] INFO  java.lang.Thread - 启动线程：1
+2022-01-21 09:43:59.993 [线程--3] INFO  java.lang.Thread - 启动线程：3
+2022-01-21 09:43:59.993 [线程--4] INFO  java.lang.Thread - 启动线程：4
+2022-01-21 09:44:02.007 [main] INFO  java.lang.Thread - 主线程恢复
+2022-01-21 09:44:02.007 [线程--0] INFO  java.lang.Thread - 线程恢复：0
+2022-01-21 09:44:02.007 [线程--4] INFO  java.lang.Thread - 线程恢复：4
+2022-01-21 09:44:02.007 [线程--3] INFO  java.lang.Thread - 线程恢复：3
+2022-01-21 09:44:02.007 [线程--2] INFO  java.lang.Thread - 线程恢复：2
+2022-01-21 09:44:02.007 [线程--1] INFO  java.lang.Thread - 线程恢复：1
+```
+
+可以看到使用 `LockSupport` 实现了线程的阻塞和唤醒，`LockSupport` 和使用 `notify` 等方法的不同之处在于，前者可以准确的唤醒某个线程，而 `notify` 是随机唤醒一个线程， `notifyAll` 则是全部唤醒。由于这个特点，`AQS` 锁的底层最终实现阻塞唤醒功能的就是 `LockSupport` 的 `park` 和 `unpark` 方法。
 
 #### 代码实例
 
@@ -410,7 +677,7 @@ new Thread(() -> {
 }).start();
 ```
 
-最普通的写法，使用 匿名内部类实例化 `Runnable` 接口，并将实例化的对象引用传入 `Thread` 对象中，最后调用 `start` 方法启动线程。
+最普通的写法，使用匿名内部类实例化 `Runnable` 接口，并将实例化的对象引用传入 `Thread` 对象中，最后调用 `start` 方法启动线程。
 
 
 ##### 使用线程池和 Callable
@@ -520,6 +787,8 @@ public void set(T value) {
 所以如果 `ThreadLocal` 没有被外部强引用的情况下，在垃圾回收的时候会被清理掉的，这样一来 `ThreadLocalMap` 中使用这个 `ThreadLocal` 的 `key` 也会被清理掉。但是，`value` 是强引用，不会被清理，这样一来就会出现 `key` 为 `null` 的 `value`。
 
 `ThreadLocalMap` 实现中已经考虑了这种情况，在调用 `set()`、`get()`、`remove()` 方法的时候，会清理掉 `key` 为 `null` 的记录。如果说会出现内存泄漏，那只有在出现了 `key` 为 `null` 的记录后，没有手动调用 `remove()` 方法，并且之后也不再调用 `get()`、`set()`、`remove()` 方法的情况下。
+
+> 在使用完成 `ThreadLocal` 之后，一定要记得调用 `remove` 方法，以防内存泄露。
 
 ## 线程安全及锁
 
@@ -2020,13 +2289,128 @@ final int fullTryAcquireShared(Thread current) {
 
 1. 首先第一部分有两种可能会直接返回-1，其实也是在排除没有条件去尝试获取锁的线程。一种是写锁已被获取并且获取写锁的不是当前线程，直接返回-1。另一种情况是当写锁没有被获取，且当前读线程应该阻塞（具体逻辑请看[^1] [^2] 的描述）且线程是第一次尝试获取锁（排除不是重入的情况），返回-1。
 2. 读锁的 `state` 大小检测，已满则抛出错误。
-3. 如果上面的条件都没有满足，其实现在这个线程有以下几种情况：已经获取写锁的线程、第一个已经获取读锁的线程在重入，不应该阻塞的读线程在第一次获取读锁，或者是已经获取读锁的线程在重入。上面的三种情况只要有一个可以满足，则表名线程是绝对可以获取锁的，因此在使用 `CAS` 尝试失败后需要返回第一步重新去判断。
+3. 如果上面的条件都没有满足，其实现在这个线程有以下几种情况：已经获取写锁的线程、第一个已经获取读锁的线程在重入，不应该阻塞的读线程在第一次获取读锁，或者是已经获取读锁的线程在重入。上面的三种情况只要有一个可以满足且计数后 `state` 不会溢出，则表明线程是绝对可以获取锁的，因此在使用 `CAS` 尝试失败后需要返回第一步重新去判断后获取锁。
+4. 剩下的操作与 `tryAcquireShared` 方法的4到10步操作相同。
 
 [^1]: 非公平锁：调用 `apparentlyFirstQueuedIsExclusive` 方法，队列中 `head` 下一项有等待的线程，且等待的线程不是共享模式，即独占模式的写锁，返回 `true` 此读线程需要等待。
 
 [^2]: 公平锁：队列中有等待的线程则当前读线程需要等待，返回 `true` 。
 
-#### 实现锁
+###### 释放资源
+
+首先看写锁释放资源的方法。
+
+```java
+protected final boolean tryRelease(int releases) {
+    if (!isHeldExclusively()) // 判断当前线程是否是拥有资源的线程
+        throw new IllegalMonitorStateException();
+    int nextc = getState() - releases;
+    boolean free = exclusiveCount(nextc) == 0;
+    if (free)
+        setExclusiveOwnerThread(null);
+    setState(nextc);
+    return free;
+}
+```
+
+写锁释放资源的逻辑很简单，首先判断当前线程是否为拥有资源的线程。然后将 `state` 减去要释放的值，判断低16位的写锁在减去释放值之后是否为0，为0则表示当前线程彻底释放了写锁，将拥有资源的线程设置为空后设置 `state` 即可。
+
+下面是读锁释放资源的方法。
+
+```java
+protected final boolean tryReleaseShared(int unused) {
+    // 获取当前线程对象
+    Thread current = Thread.currentThread();
+    // 第一个读线程是当前线程
+    if (firstReader == current) {
+        // 当前读锁只获取了一次，直接释放锁，将firstReader储存的thread对象设置为空
+        if (firstReaderHoldCount == 1)
+            firstReader = null;
+        else
+            // 第一个读锁不止获取了一次，将计数值减一
+            firstReaderHoldCount--;
+    } else { // 当前线程不是第一个读线程
+        // 获取到缓存的计数器
+        HoldCounter rh = cachedHoldCounter;
+        // 如果当前缓存计数器不是当前线程的计数器，则从ThreadLocal中获取本线程的计数器
+        if (rh == null || rh.tid != getThreadId(current))
+            rh = readHolds.get();
+        int count = rh.count;
+        // 如果线程计数器值小于等于1
+        if (count <= 1) {
+            // 移除计数器
+            readHolds.remove();
+            // 计数器值小于等于0
+            if (count <= 0)
+                // 没有获取到读锁就释放，报错
+                throw unmatchedUnlockException();
+        }
+        // 将计数器减1
+        --rh.count;
+    }
+    // 自旋释放
+    for (;;) {
+        int c = getState();
+        int nextc = c - SHARED_UNIT;
+        if (compareAndSetState(c, nextc))
+            return nextc == 0;
+    }
+}
+```
+
+同样释放资源的方法也是读锁较为复杂，首先判断当前线程是否为第一个获取读锁的线程。第一个获取读锁的线程直接减少 `firstReaderHoldCount` 和为0时置空 `firstReader` 即可，若不为第一个获取读锁的线程则需要去获取此线程的计数器进行操作。在计数器操作完成后，还需要修改 `state` 的值，此处使用了 `CAS` 加自旋的方式去修改，因为读锁是多个线程都可以同时获取，如果直接使用 `setState` 方法会引发线程安全问题，所以需要用到 `CAS` 方法。
+
+###### 总结
+
+在分析完源码之后，可以发现当一个线程已经获取到写锁时，再去获取读锁也是可以成功获取的，而这时这个线程释放掉写锁也可以只单独持有读锁，这就是写锁降级。
+
+读锁的逻辑相对复杂，其第一个获取读锁的线程计数器直接使用 `Sync` 类的成员变量储存，而其他之后获取读锁的线程的计数器则使用 `ThreadLocal` 来储存。还使用了 `cachedHoldCounter` 变量，用于储存一个线程中的计数器。
+
+可能在阅读时会有一个疑问，这个 `cachedHoldCounter` 变量有点脱裤子放屁的意思，既然 `ThreadLocal` 中已经储存了每个线程响应的计数器，直接 `get` 拿来用不就行了么？为什么还需要储存到 `cachedHoldCounter` 中？
+
+其实这个处理方式只是为了性能而已，每次从 `ThreadLocal` 中取出值肯定要比直接去成员变量中拿更加耗费资源。`cachedHoldCounter` 就在这中间起到一个缓冲的作用，先从成员变量中拿到缓存的计数器，判断是不是当前线程的计数器再去决定是否使用 `ThreadLocal` 中的计数器。
+
+还有值得注意的一个小细节，就是在第一个获取读锁的线程在变量中直接储存的是 `Thread` 对象，而在计数器 `HoldCounter` 中储存的只是一个 `long` 型的 `tid` 。
+
+可以编写两个对象，一个其中有一个 `Thread` 对象，另一个其中有一个 `long` 型变量。
+
+```java
+static class ObjThread {
+    protected Thread t;
+}
+
+static class ObjLong {
+    protected long tid;
+}
+```
+
+将其分别多次创建对象并计算用时。
+
+```java
+public static void main(String[] args) {
+    ObjThread[] ots = new ObjThread[10000000];
+    long s1 = System.currentTimeMillis();
+    for (int i = 0; i < 10000000; i++) {
+        ots[i] = new ObjThread();
+    }
+    long e1 = System.currentTimeMillis();
+    System.out.println(e1-s1);
+    
+    ObjLong[] ols = new ObjLong[10000000];
+    long s2 = System.currentTimeMillis();
+    for (int i = 0; i < 10000000; i++) {
+        ols[i] = new ObjLong();
+    }
+    long e2 = System.currentTimeMillis();
+    System.out.println(e2-s2);
+}
+```
+
+最终结果分别是 `2143` `1011` ，多次测试的结果依旧是储存 `Thread` 变量的对象要比储存 `long` 型变量的对象创建时间要高出一倍。因此我们也可以得出结论，为什么 `Doug Lea` 在编写计数器的代码时，使用 `long` 型变量来储存 `tid` ，而不是直接使用 `Thread` 对象。
+
+#### 自定义锁
+
+可以使用上面学到的知识，简单的创建一个可重入的非公平锁。
 
 ```java
 public class MyLock {
@@ -2086,8 +2470,6 @@ public class MyLock {
 
 }
 ```
-
-
 
 ### 自旋锁
 
@@ -2282,233 +2664,6 @@ public class MCSLock {
 
 可重入锁有名递归锁，是指在同一线程下已经获取锁时，还可能继续获取锁，不会因为之前已经获取锁而阻塞。在 `java` 中 `ReentrantLock` 和 `synchronized` 都是可重入锁，其优点是可一定程度避免死锁。
 
-## FutureTask
-
-### FutureTask 是什么
-
-要了解 `FutureTask` 是什么首先要了解这个类是为了解决什么问题，现在有一个场景，我们需要请求一个接口而这个网络请求是耗时操作，我们需要用到多线程技术，在请求发出后的一段时间之内我们需要在主线程中知道这个接口是否返回了数据，是否成功等情况。这时就需要用到 `FutureTask` 来实现这个需求，在此类中有很多方法可以让我们获取到线程的状态以及去操作线程。
-
-![image-20220120101305193](photo\36、FutureTask方法列表(7).png)
-
-### 使用 FutureTask
-
-```java
-public static void main(String[] args) throws ExecutionException, InterruptedException, TimeoutException {
-    FutureTask<String> futureTask = new FutureTask<>(new Callable<String>() {
-        @Override
-        public String call() throws Exception {
-            LOGGER.info("start thread");
-            Thread.sleep(2000L);
-            return "This is result data";
-        }
-    });
-    new Thread(futureTask).start();
-    LOGGER.info("Mission Is Done : {}", futureTask.isDone());
-    String result = futureTask.get();
-    // String result = futureTask.get(1, TimeUnit.SECONDS); // 在指定的时间超时后会抛出 TimeoutException
-    LOGGER.info("Mission Is Done : {}", futureTask.isDone());
-    LOGGER.info("Result Data : {}", result);
-}
-```
-
-- 在实例化 `FutureTask` 时传入 `Callable` 对象
-- 将 `FutureTask` 对象传入 Thread 并执行线程
-- 使用 `isDone` 方法检查是否执行完成
-- 使用 `get` 方法获取到返回的内容
-
-> `get` 方法有两个重载方法，一个无参数另一个需要传入超时时间，超时后抛出 `TimeoutException` 异常。
->
-> 在执行 `get` 方法时，主线程会被阻塞，知道获取到返回结果或者超时。
-
-### 解析源码
-
-#### 实例化 FutureTask
-
-`FutureTask` 拥有两个构造方法，一个直接传入 `Callable` 对象，另一个传入 `Runnable` 对象和一个默认的返回值，因为 `FutureTask` 类默认是存在可以获取返回值的。
-
-```java
-public FutureTask(Callable<V> callable) {
-    if (callable == null)
-        throw new NullPointerException();
-    this.callable = callable;
-    this.state = NEW;       // ensure visibility of callable
-}
-
-public FutureTask(Runnable runnable, V result) {
-    this.callable = Executors.callable(runnable, result);
-    this.state = NEW;       // ensure visibility of callable
-}
-```
-
-在当传入的对象是 `Callable` 时，`FutureTask` 会直接将 `Callable` 赋值给属性。当传入的 `Runnable` 时会使用到线程池对象 `Executors` 的 `callable` 方法，将 `Runnable` 转换为 `Callable`。
-
-```java
-public static <T> Callable<T> callable(Runnable task, T result) {
-    if (task == null)
-        throw new NullPointerException();
-    return new RunnableAdapter<T>(task, result);
-}
-
-// RunnableAdapter
-static final class RunnableAdapter<T> implements Callable<T> {
-    final Runnable task;
-    final T result;
-    RunnableAdapter(Runnable task, T result) {
-        this.task = task;
-        this.result = result;
-    }
-    public T call() {
-        task.run();
-        return result;
-    }
-}
-```
-
-可以看到，`Runnable` 和 传入的返回值被传入到 `RunnableAdapter` 对象中，此对象实现 `Callable` 接口并在 `call` 方法中调用了 `Runnable` 的 `run` 方法，并将传入的返回值进行返回。至此，使用传入的 `Runnable` 对象和默认返回值转换为 `Callable` 对象。
-
-#### 传入到 Thread
-
-从下图可知，`FutureTask` 实现了 `RunnableFuture` 而 `RunnableFuture` 接口类继承了 `Runnable` 和 `Future` ，因此 `FutureTask` 本质上还是 `Runnable` ，所以可以直接传入 `Thread` 类中。
-
-![image-20220120112001460](photo\37、FutureTask继承结构图(7).png) 
-
-在 `FutureTask` 中的 `run` 方法最后还是执行的是 `Callable` 的 `call` 方法。
-
-#### FutureTask 如何包装 Runnable 和 Callable
-
-![image-20220120170609195](photo\38、FutureTask包装任务类(7).png) 
-
-#### get 方法
-
-`FutureTask` 使用以下状态用来区分当前线程的状态
-
-```java
-private volatile int state;
-private static final int NEW          = 0;
-private static final int COMPLETING   = 1;
-private static final int NORMAL       = 2;
-private static final int EXCEPTIONAL  = 3;
-private static final int CANCELLED    = 4;
-private static final int INTERRUPTING = 5;
-private static final int INTERRUPTED  = 6; 
-```
-
-- `NEW` ：新建
-- `COMPLETING` ：即将完成
-- `NORMAL` ：完成
-- `EXECEPTIONAL` ：抛异常
-- `CANCELLED` ：任务取消
-- `INTERRRUPTING` ：任务即将被打断
-- `INTERRUPTED` ：任务被打断
-
-`get` 方法源码
-
-```java
-public V get() throws InterruptedException, ExecutionException {
-    int s = state; // 获取当前
-    if (s <= COMPLETING) // 状态为新建或即将完成
-        s = awaitDone(false, 0L);
-    return report(s);
-} 
-```
-
-`get` 方法会阻塞线程等待返回，阻塞部分的核心代码就是 `awaitDone` 方法。
-
-```java
-private int awaitDone(boolean timed, long nanos)
-    throws InterruptedException {
-    final long deadline = timed ? System.nanoTime() + nanos : 0L;
-    WaitNode q = null;
-    boolean queued = false;
-    for (;;) {
-        if (Thread.interrupted()) {
-            removeWaiter(q);
-            throw new InterruptedException();
-        }
-
-        int s = state;
-        if (s > COMPLETING) {
-            if (q != null)
-                q.thread = null;
-            return s;
-        }
-        else if (s == COMPLETING) // cannot time out yet
-            Thread.yield();
-        else if (q == null)
-            q = new WaitNode();
-        else if (!queued)
-            queued = UNSAFE.compareAndSwapObject(this, waitersOffset,
-                                                 q.next = waiters, q);
-        else if (timed) {
-            nanos = deadline - System.nanoTime();
-            if (nanos <= 0L) {
-                removeWaiter(q);
-                return state;
-            }
-            LockSupport.parkNanos(this, nanos);
-        }
-        else
-            LockSupport.park(this);
-    }
-} 
-```
-
-关于阻塞部分，方法中使用了 `LockSupport` 这是一个阻塞线程工具类，提供了多种方法用来阻塞及唤醒线程。
-
-```java
-public static void park(Object blocker); // 暂停当前线程
-public static void parkNanos(Object blocker, long nanos); // 暂停当前线程，不过有超时时间的限制
-public static void parkUntil(Object blocker, long deadline); // 暂停当前线程，直到某个时间
-public static void park(); // 无期限暂停当前线程
-public static void parkNanos(long nanos); // 暂停当前线程，不过有超时时间的限制
-public static void parkUntil(long deadline); // 暂停当前线程，直到某个时间
-public static void unpark(Thread thread); // 恢复当前线程
-public static Object getBlocker(Thread t);
-```
-
-#### LockSupport 简单使用
-
-使用 `LockSupport` 阻塞线程后唤醒。
-
-```java
-public static void main(String[] args) throws InterruptedException {
-    List<Thread> threadList = new ArrayList<>();
-
-    for (int i = 0; i < 5; i ++){
-        int finalI = i;
-        Thread thread = new Thread(() -> {
-            LOGGER.info("启动线程：{}", finalI);
-            LockSupport.park();
-            LOGGER.info("线程恢复：{}", finalI);
-        });
-        thread.setName("线程--"+finalI);
-        thread.start();
-        threadList.add(thread);
-    }
-
-    Thread.sleep(2000L);
-    LOGGER.info("主线程恢复");
-    for (Thread thread : threadList) {
-        LockSupport.unpark(thread);
-    }
-}
-```
-
-结果
-
-```java
-2022-01-21 09:43:59.993 [线程--0] INFO  java.lang.Thread - 启动线程：0
-2022-01-21 09:43:59.993 [线程--2] INFO  java.lang.Thread - 启动线程：2
-2022-01-21 09:43:59.993 [线程--1] INFO  java.lang.Thread - 启动线程：1
-2022-01-21 09:43:59.993 [线程--3] INFO  java.lang.Thread - 启动线程：3
-2022-01-21 09:43:59.993 [线程--4] INFO  java.lang.Thread - 启动线程：4
-2022-01-21 09:44:02.007 [main] INFO  java.lang.Thread - 主线程恢复
-2022-01-21 09:44:02.007 [线程--0] INFO  java.lang.Thread - 线程恢复：0
-2022-01-21 09:44:02.007 [线程--4] INFO  java.lang.Thread - 线程恢复：4
-2022-01-21 09:44:02.007 [线程--3] INFO  java.lang.Thread - 线程恢复：3
-2022-01-21 09:44:02.007 [线程--2] INFO  java.lang.Thread - 线程恢复：2
-2022-01-21 09:44:02.007 [线程--1] INFO  java.lang.Thread - 线程恢复：1
-```
 
 ## 线程间通信
 
