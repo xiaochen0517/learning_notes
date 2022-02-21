@@ -2192,11 +2192,13 @@ final int fullyRelease(Node node) {
 
 ```java
 final boolean isOnSyncQueue(Node node) {
-    // 节点的状态是condition或者节点的上一个节点为空
+    // 节点状态是condition 或者 节点在队列头部
     if (node.waitStatus == Node.CONDITION || node.prev == null)
         return false;
-    if (node.next != null) // If has successor, it must be on queue
+    // 非condition 且 非头部node
+    if (node.next != null) // 在条件队列的中间
         return true;
+    // 非condition 且 node在尾部
     return findNodeFromTail(node);
 }
 
@@ -2214,13 +2216,19 @@ private boolean findNodeFromTail(Node node) {
 
 
 
-当前节点状态非condition 或者 当前节点是条件队列中第一个节点 或者 当前节点没有在等待队列中 时，返回false
+当前节点状态是condition 或者 当前节点在条件队列头部，返回false
+
+当前节点状态非condition 且 当前节点在条件队列尾部 且 当前节点没有等待队列中 时，返回false
 
 
 
-当前节点状态为condition 或者 当前节点是条件队列中间的一个节点 或者 当前节点在等待队列中 时，返回true
+当前节点状态非condition 且 当前节点在条件队列中间 时，返回true
+
+当前节点状态非condition 且 当前节点在条件队列尾部 且 当前节点在等待队列中 时，返回true
 
 
+
+findNodeFromTail 从等待队列中查询节点，有为true，无为false
 
 #### ReentrantLock
 
