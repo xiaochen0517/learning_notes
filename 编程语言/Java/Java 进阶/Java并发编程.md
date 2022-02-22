@@ -66,7 +66,7 @@ private Runnable target;
 
 ##### 解析
 
-###### run方法
+###### run
 
 真正在线程中执行的代码是 `run` 方法中的代码，`Thread` 实现了 `Runnable` 接口同样也实现了 `run` 方法，以下是 `Thread` 类中实现的 `run` 方法的源代码。
 
@@ -83,7 +83,7 @@ public void run() {
 
 `Thread` 类中的 `run` 方法调用是由 `start` 方法启动之后，当线程获取到 `CPU` 执行时间时会自动调用。
 
-###### start方法
+###### start
 
 `start` 方法作用是将线程从可运行状态转换为可运行状态，内部调用了一个 `native` 方法用于初始化线程。
 
@@ -116,7 +116,7 @@ public synchronized void start() {
 
 方法会判断需要启动线程的状态，不为新建状态则直接抛出错误，不进行启动操作。
 
-###### sleep方法
+###### sleep
 
 `sleep` 方法有两个重载方法，启动 `sleep(time)` 是 `native` 方法，`sleep(millis, nanos)` 最终将参数处理后也是交给 `sleep(time)`  来执行。
 
@@ -145,13 +145,13 @@ public static void sleep(long millis, int nanos) throws InterruptedException {
 
 > 注意：`sleep` 方法不会释放锁，若当前线程拥有一个对象的锁进入 `sleep` 状态时，其他需要这个对象锁的线程依旧无法拿到锁。
 
-###### yield方法
+###### yield
 
 `yield` 方法是一个 `native` 方法，作用和 `sleep` 方法相同都是空出 `CPU` 执行时间用于执行其他线程，同样， `yield` 方法也不会释放锁。唯一与 `sleep` 方法不同的是 `yield` 方法无法控制空出的时间，并且 `yield` 方法只能让拥有同样优先级的线程有获取 `CPU` 执行时间的机会。
 
 > 注意：此方法不会将线程进入阻塞状态，只会将线程重新置为可运行状态 `RUNNABLE` 。
 
-###### join方法
+###### join
 
 `join` 方法有三个重载，此方法的作用是等待线程完成运行。
 
@@ -217,39 +217,24 @@ public final synchronized void join(long millis, int nanos) throws InterruptedEx
 }
 ```
 
-###### interrupt方法
+###### interrupt
 
-此方法会设置线程的中断标志位，如果线程在 `sleep` 、`wait` 、`join` 处于阻塞状态时，线程会定时检查中断标志位若发现中断则会抛出 `InterruptedException` 异常，并在异常抛出后将中断标志位清除。若线程在运行状态或获取锁 `synchronized` `lock` 等，则会忽略中断。
-
-```java
-public void interrupt() {
-    if (this != Thread.currentThread())
-        checkAccess();
-
-    synchronized (blockerLock) {
-        Interruptible b = blocker;
-        if (b != null) {
-            interrupt0();           // Just to set the interrupt flag
-            b.interrupt(this);
-            return;
-        }
-    }
-    interrupt0();
-}
-```
+此方法会设置线程的中断标志位，如果线程在 `sleep` 、`wait` 、`join` 处于阻塞状态时，线程会定时检查中断标志位若发现中断则会抛出 `InterruptedException` 异常，并在异常抛出后将中断标志位清除。
 
 ```java
-public final void checkAccess() {
-    SecurityManager security = System.getSecurityManager();
-    if (security != null) {
-        security.checkAccess(this);
+Thread thread = new Thread(() -> {
+    try {
+        Thread.sleep(3000);
+    } catch (InterruptedException e) {
+        e.printStackTrace();
     }
-}
+});
+thread.start();
+Thread.sleep(1000);
+thread.interrupt(); // java.lang.InterruptedException: sleep interrupted
 ```
 
-###### suspend和resume方法
-
-使用 `suspend` 挂起线程使用 `resume` 唤醒，由于此方法容易发生死锁，自 `jdk7` 已标记为弃用。
+需要注意的是，中断方法只是创建了一个标志，用于建议线程应该中断，而真正的异常抛出应该由线程自己来处理。很明显 `sleep` 方法已经对中断标志做了处理，抛出了线程中断异常。
 
 ##### 使用
 
@@ -550,6 +535,8 @@ public static void parkUntil(long deadline);
 // 恢复指定线程
 public static void unpark(Thread thread);
 ```
+
+> `park` 等阻塞方法会被中断所唤醒，但是并不会抛出异常和清除线程中断标志位，因此需要在线程被唤醒后判断是否中断过，以及设计如何去处理中断。
 
 ##### 使用
 
@@ -1561,59 +1548,98 @@ public class AtomicTestClass implements BasicLogger {
 
 `AQS` 全称 `AbstractQueuedSynchronizer` （抽象队列同步器），`AQS` 定义了一套多线程访问共享资源的同步器框架，许多同步类实现都基于 `AQS` 的理念，例如 `ReentrantLock` 等。
 
-`AQS` 类只是一个框架，展示了队列锁的设计方法。其中使用一个 `volatile int state` 来表示共享资源，多线程通过争抢此资源阻塞时进入队列来实现队列锁的效果。其中，关于 `sate` 变量的修改都是使用 `CAS` 的方式，从而保证其在多线程下的安全性。
+`AQS` 类只是一个框架，展示了队列锁的设计方法。使用 `volatile int state` 来表示共享资源，使用 `volatile` 来保证 `state` 对所有线程的可见性。多线程通过争抢此资源（及使用 `CAS` 对此值进行自增，`CAS` 成功执行即为获取锁），无法获取资源则进入同步队列中阻塞等待唤醒。
 
 #### 源码详解
 
-##### waitStatus 属性
-
-```java
-volatile int waitStatus;
-```
-
-下面是已经定义好的状态
-
-```java
-/** waitStatus value to indicate thread has cancelled */
-static final int CANCELLED =  1;
-/** waitStatus value to indicate successor's thread needs unparking */
-static final int SIGNAL    = -1;
-/** waitStatus value to indicate thread is waiting on condition */
-static final int CONDITION = -2;
-/** waitStatus value to indicate the next acquireShared should unconditionally propagate */
-static final int PROPAGATE = -3;
-```
-
-- `CANCELLED 1` ：表示当前结点已取消调度。当timeout或被中断（响应中断的情况下），会触发变更为此状态，进入该状态后的结点将不会再变化。	
-- `SIGNAL -1` ：表示后继结点在等待当前结点唤醒。后继结点入队时，会将前继结点的状态更新为 `SIGNAL` 。
-- `CONDITION -2` ：表示结点等待在 `Condition` 上，当其他线程调用了 `Condition` 的 `signal()` 方法后， `CONDITION` 状态的结点将从等待队列转移到同步队列中，等待获取同步锁。
-- `PROPAGATE -3` ：共享模式下，前继结点不仅会唤醒其后继结点，同时也可能会唤醒后继的后继结点。
-- `0` ：新结点入队时的默认状态。
-
-> 负值为节点处于有效状态，正值则表示节点已经取消。
-
 ##### Node 类
 
+###### 主要变量
+
+在 `AQS` 类中由 `Node` 静态内部类实现队列，其使用 `prev` 和 `next` 变量分别指向了当前节点的上一个和下一个节点。
+
 ```java
+volatile int waitStatus; // 当前节点状态
 volatile Node prev; // 上一个node
 volatile Node next; // 下一个node
 volatile Thread thread; // 当前节点储存的线程，实例化Node时传入，使用后置空。
+Node nextWaiter; // 条件队列内容
 ```
 
-由此可见， `Node` 其实是一个双向链表。
+`node` 类中有五个重要的变量，其中 `prev` 和 `next` 相连构成了一个双向链表。在接下来的描述中，我会将 `prev` 称为前驱而 `next` 则称为后继，方便理解。
 
 ![image-20220125095028713](photo/45、CLH队列Node图示1(7).png)
 
+###### 节点状态
+
+接下来看 `waitStatus` ，此变量表示当前 `Node` 节点的状态，在 `node` 类中有以下定义。
+
+```java
+static final int CANCELLED =  1;
+static final int SIGNAL    = -1;
+static final int CONDITION = -2;
+static final int PROPAGATE = -3;
+```
+
+- `CANCELLED 1` ：表示当前结点已取消调度。	
+- `SIGNAL -1` ：表示后继结点在等待当前结点唤醒。
+- `CONDITION -2` ：表示结点等待在条件队列中等待。
+- `PROPAGATE -3` ：共享模式下，前继结点可能会唤醒后继及其之后的结点。
+- `0` ：新结点入队时的默认状态。
+
+> 接下来的源码中，有很多地方直接判断状态是否大于0，即表示判断节点是否已经失效。
+
+`CONDITION` 状态只有在用到条件队列时才会使用，具体内容在 `Condition` 中再进行讨论。
+
+###### 独占与共享锁
+
+在 `AQS` 中定义了两种不同类型的锁，分别是独占锁与共享锁。前者同时只能有一个线程获取此锁，后者则可以有多个线程同时获取。具体的独占锁与共享锁将会在 `ReentrantReadWriteLock` 中进行介绍。在创建节点是我们需要标记这个节点是什么类型，下面是节点类型的源码。
+
+```java
+static final Node SHARED = new Node(); // 共享模式
+static final Node EXCLUSIVE = null; // 独占模式
+```
+
+`node` 节点分别使用了两个 `node` 对象用来表示共享或独占，共享使用新建的 `node` 对象，而独占模式则直接为 `null` 。下面是 `node` 类的构造方法。
+
+```java
+Node() {} // 使用其初始化head或者生成共享锁标记
+Node(Thread thread, Node mode) { // addWaiter方法使用
+    this.nextWaiter = mode;
+    this.thread = thread;
+}
+```
+
+可以看到在新建 `node` 时需要传入 `node` 中需要储存的线程以及 `node` 的类型，此 `mode` 类型直接被储存在 `nextWaiter` 变量中。注意此处的 `nextWaiter` 变量，在新建同步队列 `node` 时会标记为是否共享，而在条件队列中则会是另一个用处，具体作用在 `Condition` 中再进行介绍。
+
+`Node` 类中还有一个 `isShared` 方法，用于判断当前节点是否为共享模式。
+
+```java
+final boolean isShared() {
+    return nextWaiter == SHARED;
+}
+```
+
+
+
 ##### head 和 tail
+
+接下来分析 `AQS` 类中的 `head` 和 `tail` 变量，这两个变量位于 `AQS` 类中 `head` 指向 `node` 链表的第一个，而 `tail` 变量指向链表的最后一个。
 
 ```java
 private transient volatile Node head; // 指向线程链表的第一个node
 private transient volatile Node tail; // 指向线程链表的最后一个node
 ```
 
+由此可知，在 `AQS` 中的链表是这样一个结构。
+
 ![image-20220125104832047](photo/46、CLH队列Node图示2(7).png)
 
-##### acquire
+##### 独占锁
+
+###### 获取资源
+
+首先先看独占锁的获取资源的方法。
 
 ```java
 public final void acquire(int arg) {
@@ -1623,9 +1649,9 @@ public final void acquire(int arg) {
 }
 ```
 
-在独占模式下获取资源，若获取到资源直接返回线程，否则进入等待队列直到获取到资源后为止，整个过程忽略中断的影响。
+首先调用 `tryAcquire` 方法用于尝试获取资源，在返回获取失败 `false` 之后使用 `addWaiter` 方法将当前线程节点加入到队列中，然后使用 `acquireQueued` 方法进行自旋阻塞。
 
-###### tryAcquire
+首先我们先看一下 `tryAcquire` 尝试获取资源方法的代码。
 
 
 ```java
@@ -1635,19 +1661,16 @@ protected boolean tryAcquire(int arg) {
 }
 ```
 
-使用此方法直接去获取资源，成功返回 `true` 。此处因为 `AQS` 只是一个框架，所以此处没有真正的实现，需要在自定义同步器中去实现。
+使用此方法直接去获取资源，成功返回 `true` 不成功返回 `false` 。在概述中已经说明 `AQS` 只是一个框架，所以此处没有真正的实现，需要在自定义同步器中去实现。
 
-> 既然 `AQS` 类只是一个框架，为什么没有被定义为 `abstract` ？
->
-> 因为独占模式只需要实现 `tryAcquire` `tryRelease` ，共享模式只需要实现 `tryAcquireShared` `tryReleaseShared` ，如果定义为抽象类每个模式都需要去实现另一个模式下的接口，所以为了避免一些不必要的代码所以定义为一个普通类。
+###### 线程节点入队
 
-###### addWaiter
+如果在执行上一个方法当前线程没有获取到资源，那就需要执行 `addWaiter` 方法将节点入队，以下是此方法的源码。
 
 
 ```java
 private Node addWaiter(Node mode) {
     Node node = new Node(Thread.currentThread(), mode); // 包装为node
-    // Try the fast path of enq; backup to full enq on failure
     Node pred = tail;
     if (pred != null) { // 队列尾部不为空
         node.prev = pred; // 当前node中prev指向目前的队尾node
@@ -1661,9 +1684,11 @@ private Node addWaiter(Node mode) {
 }
 ```
 
-将当前的线程加入等待队列的末尾，并返回当前线程生产的节点。传入的 `mode` 是一个空值，表示当前的模式为独占模式，在此方法中 `Node` 类中的 `nextWaiter` 参数会等于空。
+首先用传入的类型和获取到的当前线程对象创建 `node` ，再判断尾节点是否为空。当尾结点为空则表示当前同步队列中没有节点，因此需要调用 `enq` 方法去初始化队列并将节点放入队列。若尾结点不为空则表示当前同步队列中已经存在节点，接下来就需要三步将大象放冰箱中了。
 
-###### enq
+第一步，将当前节点的前驱设置为当前队列的尾节点。第二步是一个 `CAS` 操作将 `tail` 指向的节点修改为当前节点。如果上一步成功，接下来就会将之前的尾结点的后继节点修改为当前节点。至此，当前的节点就被放置在了队列的尾部。
+
+由于将节点放置到队列尾部的这个操作并不是原子操作，它一共需要三步，那么在多线程并发的情况下会发生一个特殊的现象——尾分叉。其具体原因在分析完下面的 `enq` 方法后再进行介绍。
 
 ```java
 private Node enq(final Node node) {
@@ -1683,9 +1708,27 @@ private Node enq(final Node node) {
 }
 ```
 
-自旋循环，若 `tail` 指向的尾部为空时，将头和尾都设置为同一个空的 `node` ，若 `tail` 指向的 `node` 不为空，则执行与 `addWaiter` 中添加节点相同的代码进行添加，最后返回当前的 `node` 。
+从 `addWaiter` 方法中进入此方法的原因有两种，一是队列中没有节点，二是节点在加入队尾时 `CAS` 操作失败。无论是那种情况这个节点是必须要入队的，所以此处使用了 `for` 循环自旋，每次都获取新的 `tail` 尾结点的值。
 
-###### acquireQueued
+此时尾结点的情况分两种，一种是为空，即队列中没有节点。那么现在就需要初始化队列，首先使用 `CAS` 操作将 `head` 的值由 `null` 修改为新建的空白 `node` 。如果 `CAS` 成功则将 `tail` 尾结点也指向这个空白 `node` ，若不成功则说明 `head` 已经被修改了值。不管无论成功与否，队列中必须最少需要有一个空白的节点，才可以进行下一步的入队操作。第二种情况就是队列中已经存在节点可以进行入队操作，此处的入队方法与 `addWaiter` 方法中的入队流程相同，就不再赘述。
+
+###### 尾分叉
+
+由于方法是多线程执行，那么在执行入队操作的三步代码中就会发生以下情况。
+
+第一步因为是非同步操作，此时可能同时有多个拿着同一个 `tail` 节点的线程，然后将自己节点的前驱修改为当前的 `tail` 。
+
+![](photo/65、AQS链表尾分叉01(7).png) 
+
+此时，这些线程进入 `CAS` 操作，而 `CAS` 最后只会有一个线程成功执行，此时链表会变成下面所示。
+
+![AQS链表-尾分叉2](photo/66、AQS链表尾分叉02(7).png) 
+
+当一个节点成功切换 `tail` 后会将之前的 `tail` 节点的后继进行修改，而其他的线程会 `CAS` 失败后重新获取新的 `tail` 并尝试入队。但在其修改原 `tail` 后继之前如果我们正在遍历链表（如上图），此时从前（`head`）到后查找后继节点的方式是无法遍历到最后一个新加入的节点的，因为此时原 `tail` 节点也就是倒数第二个节点后继是为 `null` 的。而从后（`tail`）到前查找前驱的方式却可以遍历到所有的节点，这也解释了为什么在之后的很多遍历代码是从后向前遍历的，而不是从前向后。
+
+###### 阻塞与唤醒
+
+至此，当前线程已成功入队，此时则需要将线程在合适的位置和状态下阻塞，等待中断或其他线程的唤醒。
 
 
 ```java
@@ -1713,12 +1756,9 @@ final boolean acquireQueued(final Node node, int arg) {
 }
 ```
 
-进入这一步的线程已经使用 `addWaiter` 方法将当前线程放入了等待队列中，此方法需要做的就是等待队列中当前线程之前的线程执行完毕后唤醒自己。所以，代码中使用了自旋，不断获取当前线程所属节点的上一个节点，如果上一个节点变成了头结点，说明当前节点时等待队列中的而第二个节点。随即使用 `tryAcquire` 方法去尝试获取资源，若获取到资源则将 `head` 修改为当前节点，并返回是否存在中断。如果当前节点不是第二个节点，或者当前线程没有获取到资源，则会使用 `shouldParkAfterFailedAcquire` 方法清理当前节点前已经失效的节点，并使用 `parkAndCheckInterrupt` 阻塞线程并返回是否存在中断。当目前节点的上一个节点状态处于 `SIGNAL` （需要唤醒下一级节点），并且线程存在中断时，会将 `interrupted` 设置为 `true` 后继续循环。
+首先方法中定义了两个变量作为标记，分别是是否获取资源失败 `failed` 和是否存在中断 `interrupted` 。之后在代码中使用了自旋，只要当前节点的前驱节点是头结点 `head` ，则会去尝试获取资源并在获取到资源之后返回。若当前节点的前驱不为头节点或获取资源失败时，会使用 `shouldParkAfterFailedAcquire` 判断是否需要阻塞，若需要阻塞则会使用 `parkAndCheckInterrupt` 对线程进行阻塞，等待中断或被唤醒。
 
-1. 节点加入队尾后，检查状态并使用 `park` 阻塞线程等待唤醒。
-2. 被唤醒后，尝试获取资源。
-   1. 获取成功，将 `head` 指向此节点，并返回线程是否存在中断。
-   2. 获取失败，继续循环执行阻塞，等待唤醒。
+在继续分析接下来的代码之前，我们先分析一下 `shouldParkAfterFailedAcquire` 方法做了那些操作。
 
 ```java
 private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
@@ -1726,19 +1766,26 @@ private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
     if (ws == Node.SIGNAL) // 当上一级节点的状态，标记为需要唤醒当前节点时直接返回true
         return true;
     if (ws > 0) { // 上一级节点已经为取消状态
+        // 接下来的操作是将从后到前所有已取消的节点删除
         do {
-            node.prev = pred = pred.prev; // 将取消状态的节点从链表中删除
-        } while (pred.waitStatus > 0); // 循环删除知道遇到不为取消状态的节点为止
-        pred.next = node; // 将删除节点的上一级节点中的next指向当前节点
-    } else { // 小于等于0不定于-1时
-        // 更新上一级节点中的waitStatus的值为-1，安全修改，以防上一级节点刚刚取消
+            // 将取消状态的节点从链表中删除
+            node.prev = pred = pred.prev;
+        } while (pred.waitStatus > 0); // 循环删除直到遇到状态正常的节点为止
+        // 将从后向前最前一个状态正常节点的后继修改为当前节点
+        pred.next = node; 
+    } else { // 前驱节点为正常状态
+        // 将前驱节点状态修改为SIGNAL
         compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
     }
     return false;
 }
 ```
 
-如果上一个节点的状态不为 `SIGNAL` ，则会将上一级节点修改为 `SIGNAL` 。如果上一级节点状态为已取消，则会将节点删除到非取消状态的节点。
+如果前驱节点的状态不为 `SIGNAL` ，则会将前驱节点状态修改为 `SIGNAL` 。如果前驱节点状态为已取消，则会从当前节点开始从后向前将节点所有已取消状态的节点删除，直到前驱节点的状态不为取消为止。
+
+这个方法只有在当前节点的前驱节点状态为 `SIGNAL` 时才会返回 `true` ，否则就会删除已取消的节点或者修改前驱节点状态为 `SIGNAL` 状态，并返回 `false` 。因为在 `acquireQueued` 方法中调用这个方法是在自旋中调用，所以当返回 `false` 之后会在无法去获取资源时再次进入此方法，直到当前节点的前驱节点状态为 `SIGNAL` 并返回 `true` ，`acquireQueued` 中的判断会在此之后调用 `parkAndCheckInterrupt` 方法阻塞线程。
+
+简单来说，此方法返回 `true` 就表示队列已经处理完成，线程可以进入阻塞，反之则需要继续自旋不可以阻塞。
 
 ```java
 private final boolean parkAndCheckInterrupt() {
@@ -1747,11 +1794,57 @@ private final boolean parkAndCheckInterrupt() {
 }
 ```
 
-在被 `park` 方法进入 `waiting` 状态下的线程中，可以被 `unpark` 和 `interrupt` 方法唤醒。
+`park` 和 `sleep` 方法的异同之处在于其都会被中断所唤醒，而 `sleep` 会直接抛出中断错误，而 `park` 则只会被唤醒。此方法会在线程被唤醒之后返回线程是否在等待过程中中断过。
 
 > 需要注意的是， `Thread.interrupted()` 会清除当前线程的中断标记位，若中断的线程在第一调用时返回 `true` 在第二次调用时则会返回 `false` 。
 
-###### cancelAcquire
+继续返回 `acquireQueued` 方法的剩余部分。
+
+```java
+final boolean acquireQueued(final Node node, int arg) {
+    boolean failed = true;
+    try {
+        boolean interrupted = false;
+        for (;;) {
+            final Node p = node.predecessor();
+            if (p == head && tryAcquire(arg)) { 
+                setHead(node);
+                p.next = null;
+                failed = false;
+                return interrupted;
+            }
+            if (shouldParkAfterFailedAcquire(p, node) && // 线程应该阻塞是为true
+                parkAndCheckInterrupt()) // 当线程需需要阻塞时，将线程阻塞进入等待状态
+                interrupted = true; // 将中断设置为true
+        }
+    } finally {
+        if (failed) // 获取资源失败
+            cancelAcquire(node); // 取消节点在队列的等待
+    }
+}
+```
+
+线程被唤醒的情况有以下几种：
+
+1、当前节点是 `head` 的后继节点，是拥有资源的线程在释放锁时唤醒的。
+
+此时因为没有中断 `parkAndCheckInterrupt` 返回为 `false` ，直接重新执行循环。因为当前节点是 `head` 的后继，即 `p == head` 为 `true` ，此时线程会进入 `tryAcquire` 尝试获取线程。
+
+2、当前线程被中断唤醒
+
+此时 `parkAndCheckInterrupt` 返回值为 `true` ，会将中断标记变量 `interrupted` 设置为 `true` 。接着会重新执行循环，若不满足获取资源的条件线程依旧会在合适的位置继续阻塞。
+
+说明线程被中断唤醒之后 `AQS` 只是做了一个标记，而会在获取资源后返回标记进行处理。
+
+3、线程被其他的线程唤醒，且当前线程不是 `head` 的后继节点
+
+当然，线程也不是只有可能被上面的两种方式唤醒，也有可能被其他不是 `head` 节点的线程所唤醒。此时当没有中断且前驱也不为 `head` 时，线程依旧会在合适的位置继续阻塞。
+
+在线程获取到资源之后，首先设置 `head` 为当前节点，并将原 `head` 节点从队列中删除。然后将失败标志变量 `failed` 设置为 `false` 代表成功，最后返回是否存在中断。
+
+在最后，线程要么是被 `head` 的线程唤醒后获取到了资源，要么就是在自旋时非正常退出（例如在执行 `tryAcquire` 时抛出错误）。无论是这两种那个情况都要在最后执行判断，检查线程是否正常的获取到了资源，如果失败标记变量 `failed` 为 `true` 时，则表示 `for` 循环是非正常退出的，且当前线程没有获取到资源。
+
+最后会在 `for` 循环非正常退出时执行 `cancelAcquire` 方法。
 
 ```java
 private void cancelAcquire(Node node) {
@@ -1786,15 +1879,12 @@ private void cancelAcquire(Node node) {
         } else { // 传入节点的上一级节点是head时
             unparkSuccessor(node);
         }
-
         node.next = node; // help GC
     }
 }
 ```
 
-此方法用于取消删除自旋锁非正常结束且没有正常获取到资源的节点，并清除传入节点之前所有为已取消状态的节点。
-
-###### unparkSuccessor
+这个方法看起来内容很多但是只做了两件事，将当前的 `node` 从链表中删除，如果当前 `node` 是 `head` 的后继节点时，还需要使用 `unparkSuccessor` 方法去唤醒当前节点的后继节点。
 
 ```java
 private void unparkSuccessor(Node node) {
@@ -1806,34 +1896,90 @@ private void unparkSuccessor(Node node) {
     // 当下一级节点为空或者状态为取消时
     if (s == null || s.waitStatus > 0) {
         s = null;
-        // 初始变量：t为尾结点；循环条件：t不为空且不为当前传入节点；结束操作：将t指定为当前遍历节点的上一个节点
+        // 从后向前遍历最接近当前node的状态正常的node
         for (Node t = tail; t != null && t != node; t = t.prev)
             if (t.waitStatus <= 0) // 如果遍历节点状态不为取消
                 s = t;
     }
     if (s != null)
-        // 若传入node的下一级node不为空且状态正常，或者传入node之后有不为空且状态正常的node
+        // 若传入node的下一级node不为空且状态正常，或者传入node之后第一个不为空且状态正常的node
         // 则将这个node中的线程唤醒
         LockSupport.unpark(s.thread);
 }
 ```
+
+如果在 `acquireQueued` 中非正常退出 `for` 及当前线程没有获取到资源，`head` 节点的线程也在释放锁唤醒当前线程后停止执行，此时就需要当前线程将当前 `node` 从同步队列中删除并唤醒后面的节点，否则就会因为非正常退出造成死锁。
+
+###### 中断处理
+
+继续回到 `acquire` 方法中，此处的 `acquireQueued` 方法会返回线程是否被中断，若为 `true` 时，其会直接进入`selfInterrupt` 方法中，对线程进行自我中断。
+
+```java
+public final void acquire(int arg) {
+    if (!tryAcquire(arg) && // 直接尝试获取资源
+        acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+        selfInterrupt(); // 中断当前线程
+}
+static void selfInterrupt() {
+    Thread.currentThread().interrupt();
+}
+```
+
+在 `acquire` 方法中整个争锁以及入队的流程中，是不会响应中断，只会把中断的状态保存下来。
+
+当然在 `AQS` 中也有响应中断的方法，即抛出线程中断异常的方法。
+
+```java
+public final void acquireInterruptibly(int arg) throws InterruptedException {
+    if (Thread.interrupted())
+        throw new InterruptedException();
+    if (!tryAcquire(arg))
+        doAcquireInterruptibly(arg);
+}
+```
+
+可以看到在执行 `tryAcquire` 之前，程序就判断当前线程是否存在中断，且调用的等待阻塞方法也与 `acquire` 方法不同。
+
+```java
+private void doAcquireInterruptibly(int arg) throws InterruptedException {
+    final Node node = addWaiter(Node.EXCLUSIVE);
+    boolean failed = true;
+    try {
+        for (;;) {
+            final Node p = node.predecessor();
+            if (p == head && tryAcquire(arg)) {
+                setHead(node);
+                p.next = null; // help GC
+                failed = false;
+                return;
+            }
+            if (shouldParkAfterFailedAcquire(p, node) &&
+                parkAndCheckInterrupt())
+                throw new InterruptedException();
+        }
+    } finally {
+        if (failed)
+            cancelAcquire(node);
+    }
+}
+```
+
+可以看到 `doAcquireInterruptibly` 方法最大的不同之处在于，线程被中断唤醒之后只要检测到中断就会直接抛出 `InterruptedException` 异常，最后执行 `finally` 中的 `cancelAcquire` 方法。
 
 ###### 总结 acquire 方法
 
 1. 使用 `tryAcquire` 尝试获取资源，若获取到直接返回。
 2. 使用 `addWaiter` 方法将当前线程包装为节点加入等待队列中，并标记为独占模式。
 3. 使用 `acquireQueued` 方法使线程进入等待状态，并在唤醒后尝试获取资源，获取到资源后返回线程是否存在中断。
-4. 若存在中断，则使用 `selfInterrupt` 进行中断线程。
-
-> 当线程在等待状态中被中断，线程是不会响应的，只有在 `acquireQueued` 获取到了资源将是否存在中断返回后，才会由 `acquire` 方法中的 `selfInterrupt` 方法执行中断。
+4. 若存在中断，则使用 `selfInterrupt` 进行自我中断。
 
 流程图：
 
 ![image-20220125172503874](photo/47、acquire方法流程图(7).png)
 
-##### release
+###### 释放独占锁
 
-此方法时独占模式下线程释放共享资源的方法，他会释放指定量的资源彻底释放则将 `state=0` ，并唤醒等待队列中的其他线程来获取资源。
+此方法是独占模式下线程释放共享资源的方法。
 
 ```java
 public final boolean release(int arg) {
@@ -1847,44 +1993,15 @@ public final boolean release(int arg) {
 }
 ```
 
-> 此方法是使用返回来确定该线程是否已经完成对资源的释放。
+`tryRelease` 方法同样与 `tryAcquire` 方法相同，在 `AQS` 类中并没有具体的实现。其作用是释放共享资源，若全部释放完毕（`state` 为0）则返回 `true` ，反之则返回 `false` 。
 
-###### tryRelease
+`unparkSuccessor` 方法的作用已经在上面分析过，用于唤醒传入节点之后的第一个不为空且状态不为取消的节点。至此当前线程也就是拥有资源的线程，完成了资源的释放以及对后继节点的唤醒。
 
-尝试释放资源，需要自定义同步器来实现，一般情况下此线程都会成功释放资源，因为在执行 `release` 方法时线程已经获取到了资源。
+##### 共享锁
 
-```java
-protected boolean tryRelease(int arg) {
-    throw new UnsupportedOperationException();
-}
-```
+###### 获取资源
 
-###### unparkSuccessor
-
-```java
-private void unparkSuccessor(Node node) {
-    int ws = node.waitStatus; // 获取当前节点状态
-    if (ws < 0) // 状态不为取消和新创建
-        compareAndSetWaitStatus(node, ws, 0); // 将节点状态设置为新创建
-
-    Node s = node.next; // 获取下一级节点
-    if (s == null || s.waitStatus > 0) { // 节点为空或状态为已取消时
-        s = null; //将当前节点置空
-        // 从后向前查找不为空且不可为当前节点的节点
-        for (Node t = tail; t != null && t != node; t = t.prev)
-            if (t.waitStatus <= 0) // 状态不为已取消时
-                s = t;
-    }
-    if (s != null) // 当获取到当前节点之后的节点不为空时
-        LockSupport.unpark(s.thread); // 将线程恢复运行
-}
-```
-
-在此方法正常执行后，唤醒的节点就会继续执行 [acquireQueued方法](# acquireQueued方法) ，此时当唤醒的线程是队列中的第二个线程时，`acquireQueued` 方法中的获取资源和将唤醒的节点置为 `head` 的操作就会执行。若是从后到前查找并唤醒的节点不为当前队列的第二个节点时，唤醒的线程就会在 `parkAndCheckInterrupt` 方法处继续阻塞。
-
-##### acquireShared
-
-`acquireShared` 方法和独享模式的 `acquire` 方法流程基本相同，唯一不同的是当前资源已经被之前线程使用一部分后剩下的资源依旧足够下一个线程使用，则会唤醒下一个线程。这也是独享模式和共享模式最大个区别，独享模式同时只有 `head` 的线程在运行，而共享模式可能会同时运行多个线程。
+`acquireShared` 方法和独享模式的 `acquire` 方法流程基本相同，唯一不同的是当前资源可以被多个线程获取。这也是独享模式和共享模式最大个区别，独享模式同时只有一个线程获取到资源并执行同步代码，而共享模式可能会同时有多个线程获取到资源。
 
 ```java
 public final void acquireShared(int arg) {
@@ -1893,21 +2010,13 @@ public final void acquireShared(int arg) {
 }
 ```
 
-第一步依旧是尝试获取资源，不过与独显模式不同的是 `tryAcquireShared` 方法返回的是一个 `int` 值。负数表示获取资源失败，0表示获取成功但是没有多余的资源，正数表示获取成功并且有剩余的资源其他线程还可以获取资源。第二步则是线程获取资源失败后将线程加入等待队列。
+第一步依旧是尝试获取资源，不过与独占模式不同的是 `tryAcquireShared` 方法返回的是一个 `int` 值，同样需要自定义同步器去实现。第二步则是线程获取资源失败后将线程加入等待队列。
 
-###### tryAcquireShared
+`tryAcquireShared` 的返回值为负数表示获取资源失败，0表示获取成功但是没有多余的资源，正数表示获取成功并且有剩余的资源其他线程还可以获取资源。
 
-以共享模式获取资源的方法依旧是需要自定义同步器去实现。
+###### 入队阻塞
 
-```java
-protected int tryAcquireShared(int arg) {
-    throw new UnsupportedOperationException();
-}
-```
-
-###### doAcquireShared
-
-此方法用于等待和被唤醒后获取资源。
+此方法用于等待被唤醒后获取资源。
 
 ```java
 private void doAcquireShared(int arg) {
@@ -1941,17 +2050,15 @@ private void doAcquireShared(int arg) {
 }
 ```
 
-使用自旋保证每一次被唤醒后都检查节点状态，当节点为第二个节点时尝试去获取资源，若不满足条件会清除无效节点继续进入阻塞等待状态以便下一次唤醒，当自旋时非正常结束且没有正常获取到资源时，则会将本节点及之前的无效节点全部删除。
+此方法和独占锁调用的 `acquireQueued` 方法很相似，并且在其中也使用了 `addWaiter` 方法来讲节点添加到队列中。唯一不同之处在于，线程被唤醒获取到资源之后（返回值大于等于0）会调用 `setHeadAndPropagate` 方法，此方法的作用是设置 `head` 为当前节点，并在还有剩余资源时唤醒后继节点。
 
-###### setHeadAndPropagate
-
-此方法用于设置head指向的节点，在资源还有剩余时唤醒下一个节点
+下面是 `setHeadAndPropagate` 的源码。
 
 ```java
 private void setHeadAndPropagate(Node node, int propagate) {
     Node h = head; // 获取head
     setHead(node); // 将head指向当前节点，且将thread和prev置空
-    // 剩余资源数大于0 或 head不为空 或 head状态不为新建和取消
+    // 还有剩余资源 或 head不为空 或 head状态不为新建和取消
     if (propagate > 0 || h == null || h.waitStatus < 0 ||
         (h = head) == null || h.waitStatus < 0) {
         Node s = node.next; // 获取到当前节点的下一级节点
@@ -1962,7 +2069,7 @@ private void setHeadAndPropagate(Node node, int propagate) {
 }
 ```
 
-首先先将传入的节点设置为头结点，并删除其中保存的线程和上一个 `node` 引用删除，并检查剩余资源唤醒下一节点。
+首先先将传入的节点设置为头结点，然后在前驱节点条件满足的情况下，唤醒当前节点的下一个节点。
 
 ##### releaseShared
 
@@ -2006,7 +2113,7 @@ private void doReleaseShared() {
 }
 ```
 
-获取到 `head` 当状态满足时间队列中后继节点唤醒
+
 
 #### 架构图
 
