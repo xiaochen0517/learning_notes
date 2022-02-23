@@ -1620,8 +1620,6 @@ final boolean isShared() {
 }
 ```
 
-
-
 ##### head 和 tail
 
 接下来分析 `AQS` 类中的 `head` 和 `tail` 变量，这两个变量位于 `AQS` 类中 `head` 指向 `node` 链表的第一个，而 `tail` 变量指向链表的最后一个。
@@ -2071,7 +2069,7 @@ private void setHeadAndPropagate(Node node, int propagate) {
 
 首先先将传入的节点设置为头结点，然后在前驱节点条件满足的情况下，唤醒当前节点的下一个节点。
 
-##### releaseShared
+###### 释放资源
 
 释放线程占用的资源，其中的 `tryReleaseShared` 方法依旧需要具体实现类来实现。
 
@@ -2085,7 +2083,7 @@ public final boolean releaseShared(int arg) {
 }
 ```
 
-###### doReleaseShared
+###### 唤醒后继
 
 此方法用于释放共享资源。
 
@@ -2099,33 +2097,115 @@ private void doReleaseShared() {
             if (ws == Node.SIGNAL) { // 当head状态为SIGNAL -1
                 // 将状态从SIGNAL替换为新建状态 0
                 if (!compareAndSetWaitStatus(h, Node.SIGNAL, 0))
-                    continue;            // loop to recheck cases
+                    continue; // loop to recheck cases
                 unparkSuccessor(h); // 替换成功，唤醒队列中head后面的线程
             }
             // head状态为新建，且将head状态从0替换到PROPAGATE时失败，continue重启循环
             else if (ws == 0 && !compareAndSetWaitStatus(h, 0, Node.PROPAGATE))
-                continue;                // loop on failed CAS
+                continue; // loop on failed CAS
         }
         // 若head未变化则中断循环
-        if (h == head)                   // loop if head changed
+        if (h == head) // loop if head changed
             break;
     }
 }
 ```
 
+`head` 不为空且 `head` 不为 `tail` ，即表示同步队列中至少有两个节点。
 
+获取 `head` 节点状态，`head` 状态为 `SIGNAL` 表示需要唤醒后面的节点，如果替换失败说明当前有其他线程在此之前已经替换了 `head` 状态，两种可能，要么有线程释放资源唤醒 `head` 后继，要么获取资源的线程在唤醒后继。如果替换成功，则说明可以唤醒后面的节点。
 
-#### 架构图
+如果队列中有大于一个节点且在 `else if` 判断时发现 `head` 状态已经为0了，说明再此之前已经有线程将 `head` 状态修改为0，尝试将 `head` 状态修改为 `PROPAGATE` 。成功替换那么无论接下来 `head` 是否被替换成新的 `head` ，都会在执行 `setHeadAndPropagate` 时唤醒下一个节点。不成功就继续重启循环，获取到新的 `head` 再去唤醒下一级节点。
+
+在执行到 `h==head` 时并没有新节点被唤醒并获取资源替换 `head` 则结束循环。
+
+> 对于此处我的理解是，多唤醒节点无所谓，反正获取不到资源会继续 `park` ，但是如果因为没有唤醒导致问题，那就亏大了。
+
+###### PROPAGATE
+
+`PROPAGATE` 的引入是为了解决一个 `BUG` 的，首先先来看一下没有 `PROPAGATE` 时的各方法的代码。
+
+```java
+public final boolean releaseShared(int arg) {
+    if (tryReleaseShared(arg)) {
+        Node h = head;
+        if (h != null && h.waitStatus != 0) // deleted
+            unparkSuccessor(h);
+        return true;
+    }
+    return false;
+}
+```
+
+释放资源的变化主要是不会再进行判断 `head` 的状态是否正常了，因为这个判断在共享锁的情况下很有可能导致无法唤醒后继节点。
+
+```java
+private void setHeadAndPropagate(Node node, int propagate) {
+    setHead(node);
+    if (propagate > 0 && node.waitStatus != 0) { // changed
+        Node s = node.next;
+        if (s == null || s.isShared())
+            unparkSuccessor(node); // changed
+    }
+}
+```
+
+在没有 `PROPAGATE` 时共享锁和独占锁调用的方法还是相对来说比较统一的。
+
+```java
+private void unparkSuccessor(Node node) {
+    compareAndSetWaitStatus(node, Node.SIGNAL, 0); // changed
+    Node s = node.next;
+    if (s == null || s.waitStatus > 0) {
+        s = null;
+        for (Node t = tail; t != null && t != node; t = t.prev)
+            if (t.waitStatus <= 0)
+                s = t;
+    }
+    if (s != null)
+        LockSupport.unpark(s.thread);
+}
+```
+
+唤醒节点的方法增加了一个判断如果 `node` 状态小于0才会设置为0，主要原因是 `doReleaseShared` 已经对状态做了修改。
+
+当前有4个线程，其中线程1和2已经获取了共享锁正在执行，而3和4正在队列中等待。
+
+![AQS PROPAGATE用处](photo/67、AQS-PROPAGATE问题01(7).png) 
+
+此时线程1释放了锁，使用 `unparkSuccessor` 方法将 `head` 状态修改为0。然后唤醒了线程3，由于资源只足够线程3获取，因此线程3在使用 `tryAcquireShared` 获取资源之后返回了0。
+
+![AQS PROPAGATE用处 1](photo/68、AQS-PROPAGATE问题02(7).png) 
+
+紧接着此时线程2也释放了资源，此时线程2在执行 `releaseShared` 就会发现，`head` 节点状态已经是0了，所以就不会执行 `unparkSuccessor` 进行下一步的唤醒。
+
+此时线程3执行到了 `setHeadAndPropagate` ，但是发现 `tryAcquireShared` 方法返回的值是0，所以也不会执行 `unparkSuccessor` 方法。
+
+至此，队列中的线程4会因为 `BUG` 无法被唤醒。
+
+参考：[AbstractQueuedSynchronizer源码解读 ](https://www.cnblogs.com/micrari/p/6937995.html) 
+
+##### 总结
 
 ![AQS架构图解](photo/61、AQS架构图解(7).png) 
 
+通过上面的分析可知节点状态的切换逻辑。
+
+![AQS Node 状态切换2](photo/69、AQS单节点状态切换(7).png) 
+
+队列中节点状态切换。
+
+![AQS Node 状态切换](photo/70、AQS队列节点状态切换(7).png) 
+
 #### Condition
+
+##### 概述
 
 
 
 ##### 源码解析
 
-###### Condition
+###### 接口类
 
 
 ```java
@@ -2140,14 +2220,16 @@ public interface Condition {
 }
 ```
 
-###### 成员变量
+
+
+###### 链表结构
 
 ```java
 private transient Node firstWaiter;
 private transient Node lastWaiter;
 ```
 
-
+用于指向条件队列的头结点和尾节点。
 
 ###### await
 
