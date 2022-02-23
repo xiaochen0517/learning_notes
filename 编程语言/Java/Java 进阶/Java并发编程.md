@@ -2201,7 +2201,9 @@ private void unparkSuccessor(Node node) {
 
 ##### 概述
 
+在上面生产者消费者模式中使用了多种方法实现，由于 `notify` 和 `wait` 来实现阻塞和唤醒，但是 `notify` 和 `notifyAll` 并没有办法去指定一种类型的线程进行唤醒。就当系统中有若干线程，而分为两种类型分别是生产者和消费者，生产者需要唤醒的是消费者，而消费者需要唤醒的生产者。此时我们就需要将线程分类，并精确唤醒某个分类中的线程。
 
+在上面的介绍中，我们已经使用 `Condition` 实现了这个精确唤醒某个分类的操作，下面就来分析一下源码。
 
 ##### 源码解析
 
@@ -2220,18 +2222,28 @@ public interface Condition {
 }
 ```
 
-
+`AQS` 中的 `ConditionObject` 实现的就是这个接口类，而这个接口类定义了很多线程唤醒和阻塞的方法。
 
 ###### 链表结构
 
+查看 `ConditionObject` 中的成员变量。
+
 ```java
-private transient Node firstWaiter;
-private transient Node lastWaiter;
+private transient Node firstWaiter; // 头结点
+private transient Node lastWaiter; // 尾结点
 ```
 
 用于指向条件队列的头结点和尾节点。
 
-###### await
+在 `Node` 类中有一个 `nextWaiter` 变量，在上面分析时用来标记独占锁与共享锁，在 `Condition` 中又有了一个新的作用——单向链表。
+
+![AQS 条件队列](photo/71、AQS条件队列结构(7).png) 
+
+可以看到在条件队列中，`prev` 和 `next` 都是 `null` 使用到的有 `nextWaiter` 和 `thread` 等。同步队列用来让线程争锁，而条件队列用来给线程分类，所以条件队列中的线程最终还是要到同步队列中去争锁的。
+
+###### 入队阻塞
+
+首先我们先查看入队阻塞方法。
 
 ```java
 public final void await() throws InterruptedException {
@@ -2243,24 +2255,26 @@ public final void await() throws InterruptedException {
     // 释放当前线程获取的资源
     int savedState = fullyRelease(node);
     int interruptMode = 0; // 是否中断
-    
+    // 当前线程是否在同步队列中
     while (!isOnSyncQueue(node)) {
-        LockSupport.park(this);
+        LockSupport.park(this); // 阻塞
+        // 检查中断
         if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
             break;
     }
+    // 入同步队列争锁，此方法就是独占锁使用的阻塞争锁方法
     if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
         interruptMode = REINTERRUPT;
+    // 当前节点后还有节点
     if (node.nextWaiter != null) // clean up if cancelled
-        unlinkCancelledWaiters();
+        unlinkCancelledWaiters(); // 清理无用节点
+    // 是否存在中断
     if (interruptMode != 0)
-        reportInterruptAfterWait(interruptMode);
+        reportInterruptAfterWait(interruptMode); // 处理中断
 }
 ```
 
-
-
-###### addConditionWaiter
+首先检测是否存在中断，直接抛出中断异常。进入此方法表示线程必须阻塞，所以先将线程打包为 `node` 后入队。既然要调用 `await` 方法，那么线程一定是当前持有锁的线程，所以需要释放资源之后才可以阻塞，否则就会变成死锁。当前方法的代码就分析到这里，我们先观察 `addConditionWaiter` 节点入队方法。
 
 ```java
 private Node addConditionWaiter() {
@@ -2287,64 +2301,51 @@ private Node addConditionWaiter() {
 }
 ```
 
-首先获取到尾结点后判断其状态是否正常，非 `condition` 状态就需要将所有无效节点从链表中移除，载重新获取新的尾结点。然后为当前线程创建节点，若尾结点为空则表示当前链表为空，直接将当前节点设置为首节点和尾结点即可，若尾结点不为空时需要将当前线程的节点连接在尾结点之后，最后返回当前线程的节点。此方法的作用就是将当前线程作为节点加入链表中并返回当前线程的节点。
+首先方法需要获取到尾结点，但是当前的尾结点有可能已经进入了同步队列，所以需要判断一下尾结点的状态是否为 `condition` 。清除掉无用的节点之后，获取到最新正常的尾结点开始入队操作，首先创建当前线程的 `node` 状态设置为 `condition` ，在正常情况下条件队列中的节点状态就应该是 `condition` 。最后返回当前线程的节点。
 
-可以得出，在链表中只有单个节点的情况下，`ConditionObject` 对象的头和尾节点变量都是指向这个节点的。
+###### 清洗队列
 
-###### unlinkCancelledWaiters
+接下来查看清洗队列，也就是删除无用节点的方法。
 
 ```java
 private void unlinkCancelledWaiters() {
-    // 首节点
+    // 获取首节点
     Node t = firstWaiter;
     Node trail = null;
-    // 首节点不为空
+    // 当前节点不为空
     while (t != null) {
-        // 获取第二个节点
+        // 获取当前节点下一个节点
         Node next = t.nextWaiter;
-        // 首节点的状态不为等待
+        // 当前节点的状态不为condition，需要删除
         if (t.waitStatus != Node.CONDITION) {
-            // 将首节点指向下一节点值置空
+            // 将当前节点与后一个节点断开连接
             t.nextWaiter = null;
-            // trail节点为空
+            // 如果当前节点的上一个节点为空
             if (trail == null)
-                // 将第一个节点设置为第二个节点
+                // 那么首节点就是当前节点的下一个节点
                 firstWaiter = next;
             else
-                // trail不为空，将trail的下一节点设置为第二个节点
+                // 如果不为空则需要将上一个节点和下一个节点连接
                 trail.nextWaiter = next;
-            // 第二个节点为空
+            // 如果下一个节点为空，表示链表已经结束
             if (next == null)
-                // 尾结点设置为trail
+                // 将尾结点设置为当前节点的上一个节点
                 lastWaiter = trail;
         }
         else
-            // 首节点的状态是等待，将trail设置为首节点
+            // 如果当前节点不需要删除，将当前节点设置为下次遍历时t的上一个节点
             trail = t;
-        // 设置t为下一个节点
+        // 设置下一次遍历的主节点为当前节点的下一个节点
         t = next;
     }
 }
 ```
 
+当前链表只有 `nextWaiter` 将整个链表串联起来，因此这是个单项链表只可以从前向后遍历。首先获取到链表的第一个节点从此开始，每次在循环完成后 `t` 就变成了下一个节点，如果 `t` 为空则表示这个链表没有节点或者当前列表已经遍历完成。在每次循环时判断当前节点 `t` 的状态是否为 `condition` ，而 `trail` 则表示当前节点的上一个节点，`next` 则是当前节点的下一个节点。如果不为 `condition` 则表示当前节点的状态是有问题的，则需要删除，一直遍历到最后一个节点结束。
 
-首先方法中有一个循环而 `t` 为 `null` 才会退出循环，每次循环时都会检测 `t` 的状态，每次的最后将当前节点的 `next` 设置为下一次检查的节点。`t` 就是每次循环的当前节点，第一个开始循环时的当前节点从链表的第一个节点开始。在下一次的循环中的 `t` 就是当前 `t` 的下一个节点，直至循环到最后一个节点时下一个节点为空，这个方法才会停止。
+###### 释放资源
 
-`trail` 变量在每次当前节点不用删除时（即状态为 `condition` ），就会在当前循环结束前被指向当前节点 `t` 。而当前节点为 `condition` 并在循环结束前将当前节点在链表中删除，那么在下次循环时 `trail` 依旧是 `t` 的上一级节点。
-
-从上面的分析中可以得出，`t` 就是当前检查的节点，而 `trail` 就是当前节点的上一级节点，`next` 则是当前节点的下一级节点。
-
-如果当前循环的节点不是 `condition` 的时候，表示当前节点需要删除掉。接着将当前节点中指向下一个节点的引用置空，再去判断当前节点的上一个节点是否为空。若上一个节点为空，直接将当前节点从链表中剔除，将首节点指向当前节点的第二个节点。若上一个节点不为空，则会将上一个节点的下级节点指向当前节点的下一个节点，简单来说就是把当前节点从链表中移除。
-
-将没用的节点移除之后，判断当前节点的下一个节点是否是空，如果是空的话就表示这个链表循环到最后一个了，将尾节点设置成当前节点的上一个节点。如果不为空则表示后面还可能有节点，所以还得接着循环。
-
-这个方法执行完毕之后，链表中剩下的就都是状态为 `condition` 的节点，这个方法的作用就是删除无用的节点。
-
-
-
-###### fullyRelease 
-
-
+接下来分析释放资源方法。
 
 ```java
 final int fullyRelease(Node node) {
@@ -2371,29 +2372,73 @@ final int fullyRelease(Node node) {
 }
 ```
 
-此方法首先获取到 `state` 的值，直接释放所有资源，若成功则返回释放资源的数量，若失败则会将当前节点设置为取消状态。
+此方法首先获取到 `state` 的值，直接释放所有资源，若成功则返回释放资源的数量，若失败则会将当前节点设置为取消状态，返回的资源数量需要在之后 `await` 阻塞结束争锁时进行恢复。
 
+在 `release` 方法调用的 `tryRelease` 方法中需要去判断当前线程是否是获取资源的线程，若不是就需要抛出错误，此处就会进入 `finally` 方法中取消当前节点，释放操作正常失败也是此流程。
 
+###### 唤醒节点
 
-###### isOnSyncQueue
+在分析 `isOnSyncQueue` 方法之前，需要先分析唤醒节点部分代码的操作。
 
+```java
+public final void signal() {
+    if (!isHeldExclusively())
+        throw new IllegalMonitorStateException();
+    Node first = firstWaiter;
+    if (first != null)
+        doSignal(first);
+}
+```
 
+`isHeldExclusively` 用于判断当前线程是否为拥有资源的线程，此方法由具体的实现类实现，此处调用 `signal` 一定是已经获取了资源的线程。然后获取首节点若首节点不为空，则表示条件队列中一定有节点，调用 `doSignal` 方法。
+
+```java
+private void doSignal(Node first) {
+    do {
+        // 第一个节点如果为空
+        if ( (firstWaiter = first.nextWaiter) == null)
+            // 
+            lastWaiter = null;
+        first.nextWaiter = null;
+    } while (!transferForSignal(first) &&
+             (first = firstWaiter) != null);
+}
+```
+
+依次尝试唤醒节点，直到唤醒第一个可以被成功唤醒的节点，或者队列中一个节点也不能唤醒。
+
+```java
+final boolean transferForSignal(Node node) {
+    if (!compareAndSetWaitStatus(node, Node.CONDITION, 0))
+        return false;
+    Node p = enq(node);
+    int ws = p.waitStatus;
+    if (ws > 0 || !compareAndSetWaitStatus(p, ws, Node.SIGNAL))
+        LockSupport.unpark(node.thread);
+    return true;
+}
+```
+
+首先是否 `CAS` 操作修改节点状态，让其他线程在执行时计时发现此节点已经被唤醒入队争锁，若修改失败则返回 `flase` 继续尝试唤醒下一个节点。接着让节点进入同步队列，等待并争锁。入队完成后此时需要将 `enq` 方法返回的当前节点入队后的上一个节点的状态修改为 `SIGNAL` ，以便上一个节点获取锁之后在释放锁时可以正常唤醒当前入队的节点。如果上一个节点的状态为已取消或者修改状态失败，直接唤醒这个节点，节点被唤醒之后会被在下一个循环时调用的 `shouldParkAfterFailedAcquire` 直接删除，使同步队列恢复正常。
+
+###### 节点位置
+
+因为当前的队列中的节点会在被中断和 `single` 等方法唤醒后需要进入同步队列，此时因为是并发所以要一段较为复杂的判断来判断同步队列中是否存在指定的线程。
 
 ```java
 final boolean isOnSyncQueue(Node node) {
-    // 节点状态是condition 或者 节点在队列头部
+    // 节点状态是condition 或者 节点的前驱已经有值
     if (node.waitStatus == Node.CONDITION || node.prev == null)
         return false;
-    // 非condition 且 非头部node
-    if (node.next != null) // 在条件队列的中间
+
+    if (node.next != null) // 已经在同步队列中
         return true;
-    // 非condition 且 node在尾部
     return findNodeFromTail(node);
 }
 
 private boolean findNodeFromTail(Node node) {
     Node t = tail;
-    for (;;) {
+    for (;;) { // 从后到前遍历节点直到找到或结束为止
         if (t == node)
             return true;
         if (t == null)
@@ -2403,21 +2448,11 @@ private boolean findNodeFromTail(Node node) {
 }
 ```
 
+节点状态是 `condition` 说明节点正常，并没有进行入同步队列操作那么节点必定不会再同步队列中。如果节点的前驱为空那么当前节点也并没有在同步队列，因为入队的三步第一步就是将节点的前驱和队列进行连接。
 
+那么如果节点的后继不为空则表示入队的三步操作已经完全完成了，说明节点必定在同步队列中。如果上面都不满足接下来就没有办法通过单个节点的内容来判断其是否在同步队列中了，所以直接对同步队列从后到前进行遍历判断。
 
-当前节点状态是condition 或者 当前节点在条件队列头部，返回false
-
-当前节点状态非condition 且 当前节点在条件队列尾部 且 当前节点没有等待队列中 时，返回false
-
-
-
-当前节点状态非condition 且 当前节点在条件队列中间 时，返回true
-
-当前节点状态非condition 且 当前节点在条件队列尾部 且 当前节点在等待队列中 时，返回true
-
-
-
-findNodeFromTail 从等待队列中查询节点，有为true，无为false
+`findNodeFromTail` 的作用就是从同步队列中查询是否存在指定节点，有为 `true` ，无为 `false` 。
 
 #### ReentrantLock
 
