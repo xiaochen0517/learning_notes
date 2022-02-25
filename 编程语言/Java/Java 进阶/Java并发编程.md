@@ -379,7 +379,7 @@ static final class RunnableAdapter<T> implements Callable<T> {
 
 可以看到，`Runnable` 和 传入的返回值被传入到 `RunnableAdapter` 对象中，此对象实现 `Callable` 接口并在 `call` 方法中调用了 `Runnable` 的 `run` 方法，并将传入的返回值进行返回。至此，使用传入的 `Runnable` 对象和默认返回值转换为 `Callable` 对象。
 
-###### 对 Runnable 和 Callable的包装
+###### 包装接口
 
 从下图可知，`FutureTask` 实现了 `RunnableFuture` 而 `RunnableFuture` 接口类继承了 `Runnable` 和 `Future` ，因此 `FutureTask` 本质上还是 `Runnable` ，所以可以直接传入 `Thread` 类中。
 
@@ -389,7 +389,7 @@ static final class RunnableAdapter<T> implements Callable<T> {
 
 ![image-20220120170609195](photo\38、FutureTask包装任务类(7).png) 
 
-###### get 方法
+###### 获取返回值
 
 `FutureTask` 使用以下状态用来区分当前线程的状态
 
@@ -3358,52 +3358,11 @@ public class MCSLock {
 
 在 `JDK` 中的 `JUC (java.util.concurrent)` 包下有着将各种阻塞队列的实现，包括 `ArrayBlockingQueue` 、`LinkedBlockingQueue` 、`PriorityBlockQueue` 。
 
-### 实现一个简单的阻塞队列
+### ArrayBlockingQueue
 
-通过继承 `LinkedList` 实现与原生 `LinkedBlockingQueue` 相似的功能。
+#### 概述
 
-```java
-public class MoChenBlockingQueue<T> extends LinkedList<T> implements BasicLogger {
-
-    private long MAX_SIZE = 10;
-
-    public MoChenBlockingQueue(){}
-
-    public MoChenBlockingQueue(long capacity){
-        if (capacity <= 0){
-            throw new IllegalArgumentException("不可小于等于0");
-        }
-        this.MAX_SIZE = capacity;
-    }
-
-    public synchronized void put(T resource) throws InterruptedException {
-        while (super.size() >= MAX_SIZE){
-            LOGGER.info("队列已满");
-            this.wait();
-        }
-        LOGGER.info("插入内容，插入前大小：{}", super.size());
-        super.push(resource);
-        this.notifyAll();
-    }
-
-    public synchronized T take() throws InterruptedException {
-        while (super.size() <= 0){
-            LOGGER.info("队列已空");
-            this.wait();
-        }
-        LOGGER.info("取出内容，取出前大小：{}", super.size());
-        T pop = super.pop();
-        this.notifyAll();
-        return pop;
-    }
-
-
-}
-```
-
-### 原生阻塞队列
-
-#### 队列与阻塞队列继承链对比
+`ArrayBlockingQueue` 翻译过来就是数组阻塞队列，它与 `ArrayList` 功能相同，
 
 **`ArrayList` 与 `ArrayBlockingQueue` 继承链对比** 
 
@@ -3535,11 +3494,226 @@ private void signalNotEmpty() {
 
 **`put` 方法** 
 
-
-
 可以看到在 `put` 方法中使用了 `ReentrantLock` 来保证多线程数据的原子性。
 
 在 `LinkedLockingQueue` 中声明了两个锁和对应的两个线程队列，分别用于存取数据 `put/take` 
 
+----
+
+==需要先学习容器相关知识，等待后续补全==
+
+----
+
 ## 线程池
+
+### 概述
+
+线程池从字面意思来理解就是一个装有线程的池子，线程池的设计初衷就是为了更加高效的使用多线程。线程池将线程的创建、使用和调度等细节进行屏蔽，开发者可以通过暴露出的接口直接对其操作。
+
+线程池有以下优点：
+
+- 降低资源消耗，通过重复利用已经创建好的线程资源，降低线程创建和销毁的消耗。
+- 提高响应速度，当任务到达时，任务可以不需要等待线程创建，可以使用线程池中创建好的线程直接用。
+- 提高可管理性，线程不可能无限制的创建，线程池可以对线程进行统一的分配管理、调优和监控。
+
+### 使用
+
+直接使用 `ThreadPoolExecutor` 类实现线程池。
+
+```java
+ThreadPoolExecutor tpe = new ThreadPoolExecutor(10, 100, 30, TimeUnit.SECONDS, new SynchronousQueue<>());
+tpe.execute(()->{
+    System.out.println("thread-1 is running");
+});
+```
+
+使用 `Executors` 类的 `newSingleThreadExecutor` 方法创建线程池。
+
+```java
+ExecutorService es = Executors.newSingleThreadExecutor();
+Future<?> future = es.submit(() -> {
+    System.out.println("thread-2 is running");
+});
+Future<String> future1 = es.submit(() -> {
+    System.out.println("thread-3 is running");
+    return "result";
+});
+Future<String> future2 = es.submit(() -> {
+    System.out.println("thread-3 is running");
+}, "result");
+System.out.println(future.get()); // null
+System.out.println(future1.get()); // result
+System.out.println(future2.get()); // result
+```
+
+
+
+### 分析
+
+#### Executor
+
+线程池的主要结构是 `Executor` 框架，`ThreadPoolExecutor` 等类此基础上进行实现，下面是主要类的继承关系。
+
+![image-20220224203824851](photo/72、线程池继承结构(7).png) 
+
+接下来查看一下 `Executor` 类和 `ExecutorService` 类的源码。
+
+```java
+public interface Executor {
+    void execute(Runnable command);
+}
+```
+
+`Executor` 接口类只定义了一个 `execute` 方法，下面是继承了 `Executor` 接口类的 `ExecutorService` 类。
+
+```java
+public interface ExecutorService extends Executor {
+    
+	// 启动一次有序的关闭，之前提交的任务执行，但不接受新任务 这个方法不会等待之前提交的任务执行完毕
+    void shutdown();
+	// 试图停止所有正在执行的任务，暂停处理正在等待的任务，返回一个等待执行的任务列表
+    // 这个方法不会等待正在执行的任务终止
+    List<Runnable> shutdownNow();
+	// 如果已经被shutdown，返回true
+    boolean isShutdown();
+	// 如果所有任务都已经被终止，返回true
+    boolean isTerminated();
+	// 在一个shutdown请求后，阻塞的等待所有任务执行完毕,或者到达超时时间，或者当前线程被中断
+    boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException;
+	// 提交任务返回Future代表这个任务，有返回值
+    <T> Future<T> submit(Callable<T> task);
+	// 提交任务返回Future代表这个任务，返回第二参数
+    <T> Future<T> submit(Runnable task, T result);
+	// 提交任务返回Future
+    Future<?> submit(Runnable task);
+
+    <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> tasks) throws InterruptedException;
+
+    <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> tasks, long timeout, TimeUnit unit)
+
+    <T> T invokeAny(Collection<? extends Callable<T>> tasks) throws InterruptedException, ExecutionException;
+
+    <T> T invokeAny(Collection<? extends Callable<T>> tasks, long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException;
+}
+```
+
+`ExecutorService` 接口类更进一步，定义了许多对线程池的操作，至此主要的接口类部分就分析完成了，接下来开始分析真正的实现部分。
+
+#### AbstractExecutorService
+
+这个抽象类继承了 `ExecutorService` 并实现了接口中的很多方法，首先先从 `submit` 方法开始。
+
+```java
+public Future<?> submit(Runnable task) {
+    if (task == null) throw new NullPointerException();
+    RunnableFuture<Void> ftask = newTaskFor(task, null);
+    execute(ftask);
+    return ftask;
+}
+public <T> Future<T> submit(Runnable task, T result) {
+    if (task == null) throw new NullPointerException();
+    RunnableFuture<T> ftask = newTaskFor(task, result);
+    execute(ftask);
+    return ftask;
+}
+public <T> Future<T> submit(Callable<T> task) {
+    if (task == null) throw new NullPointerException();
+    RunnableFuture<T> ftask = newTaskFor(task);
+    execute(ftask);
+    return ftask;
+}
+```
+
+`submit` 方法又三个重载方法，内容都大同小异，第一步首先判断传入的任务是否为空。第二步直接创建一个 `RunnableFuture` 对象，最后使用 `execute` 方法进行下一步操作，并将 `RunnableFuture` 对象返回，用于获取返回值。
+
+```java
+protected <T> RunnableFuture<T> newTaskFor(Runnable runnable, T value) {
+    return new FutureTask<T>(runnable, value);
+}
+protected <T> RunnableFuture<T> newTaskFor(Callable<T> callable) {
+    return new FutureTask<T>(callable);
+}
+```
+
+`newTaskFor` 方法同样也是有两个重载方法，分别直接接受 `callable` 和接受 `runnable` 和一个自定义的返回值，在上面对 `FutureTask` 类的介绍中已经介绍了其对这两个接口类的包装，这里就不再赘述。
+
+
+
+```java
+public <T> T invokeAny(Collection<? extends Callable<T>> tasks)
+    throws InterruptedException, ExecutionException {
+    try {
+        return doInvokeAny(tasks, false, 0);
+    } catch (TimeoutException cannotHappen) {
+        assert false;
+        return null;
+    }
+}
+```
+
+
+
+```java
+private <T> T doInvokeAny(Collection<? extends Callable<T>> tasks,
+                          boolean timed, long nanos)
+    throws InterruptedException, ExecutionException, TimeoutException {
+    if (tasks == null)
+        throw new NullPointerException();
+    int ntasks = tasks.size();
+    if (ntasks == 0)
+        throw new IllegalArgumentException();
+    ArrayList<Future<T>> futures = new ArrayList<Future<T>>(ntasks);
+    ExecutorCompletionService<T> ecs =
+        new ExecutorCompletionService<T>(this);
+
+    try {
+        ExecutionException ee = null;
+        final long deadline = timed ? System.nanoTime() + nanos : 0L;
+        Iterator<? extends Callable<T>> it = tasks.iterator();
+
+        futures.add(ecs.submit(it.next()));
+        --ntasks;
+        int active = 1;
+
+        for (;;) {
+            Future<T> f = ecs.poll();
+            if (f == null) {
+                if (ntasks > 0) {
+                    --ntasks;
+                    futures.add(ecs.submit(it.next()));
+                    ++active;
+                }
+                else if (active == 0)
+                    break;
+                else if (timed) {
+                    f = ecs.poll(nanos, TimeUnit.NANOSECONDS);
+                    if (f == null)
+                        throw new TimeoutException();
+                    nanos = deadline - System.nanoTime();
+                }
+                else
+                    f = ecs.take();
+            }
+            if (f != null) {
+                --active;
+                try {
+                    return f.get();
+                } catch (ExecutionException eex) {
+                    ee = eex;
+                } catch (RuntimeException rex) {
+                    ee = new ExecutionException(rex);
+                }
+            }
+        }
+
+        if (ee == null)
+            ee = new ExecutionException();
+        throw ee;
+
+    } finally {
+        for (int i = 0, size = futures.size(); i < size; i++)
+            futures.get(i).cancel(true);
+    }
+}
+```
 
