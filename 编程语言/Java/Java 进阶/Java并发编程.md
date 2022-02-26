@@ -1,14 +1,21 @@
+前置知识：
+
+- Java 基础
+- CPU 基本结构
+- 容器基础
+- JVM 内存
+
 ## 概述 Overview
 
 ### 并发与并行
 
 #### 并发是什么
 
-并发是指当有多个线程在操作时,如果系统同时之能执行一个线程，它只能把CPU运行时间划分成若干个时间段,再将时间 段分配给各个线程执行，在一个时间段的线程代码运行时，其它线程处于挂起状。这种方式称之为并发(`Concurrent`)。
+并发是指当有多个线程在操作时,如果系统同时之能执行一个线程，它只能把CPU运行时间划分成若干个时间段,再将时间 段分配给各个线程执行，在一个时间段的线程代码运行时，其它线程处于挂起状。这种方式称之为并发（ Concurrent ）。
 
 #### 并行是什么
 
-并行是当系统可同时执行的线程大于等于需要执行的线程数时，这时所有的线程都可以在同一时间同时执行，而这时程序的执行就被称为并行(`parallel`)。
+并行是当系统可同时执行的线程大于等于需要执行的线程数时，这时所有的线程都可以在同一时间同时执行，而这时程序的执行就被称为并行（Parallel ）。
 
 ### 进程和线程
 
@@ -3094,7 +3101,7 @@ public static void main(String[] args) {
 
 最终结果分别是 `2143` `1011` ，多次测试的结果依旧是储存 `Thread` 变量的对象要比储存 `long` 型变量的对象创建时间要高出一倍。因此我们也可以得出结论，为什么 `Doug Lea` 在编写计数器的代码时，使用 `long` 型变量来储存 `tid` ，而不是直接使用 `Thread` 对象。
 
-#### 自定义锁
+#### 简单实现
 
 可以使用上面学到的知识，简单的创建一个可重入的非公平锁。
 
@@ -3156,6 +3163,50 @@ public class MyLock {
 
 }
 ```
+
+然后来试用一下。
+
+```java
+public class TestMyLock implements BasicLogger {
+
+    private static int m = 0;
+    private static final int MAX_THREADS = 10000;
+
+    public static void main(String[] args) throws InterruptedException {
+        Thread[] threads = new Thread[MAX_THREADS];
+        MyLock lock = new MyLock(); // 新建锁
+        
+        for (int i = 0; i < MAX_THREADS; i++) {
+            threads[i] = new Thread(()->{
+                lock.lock(); // 加锁
+                try {
+                    for (int i1 = 0; i1 < 10000; i1++) {
+                        m++;
+                    }
+                }finally {
+                    lock.unlock(); // 释放锁
+                }
+            });
+        }
+        for (int i = 0; i < MAX_THREADS; i++) {
+            threads[i].start();
+        }
+        for (int i = 0; i < MAX_THREADS; i++) {
+            threads[i].join();
+        }
+        LOGGER.info("m 的值：{}", m);
+    }
+
+}
+```
+
+结果
+
+```java
+2022-02-26 11:45:39.119 [main] INFO  java.lang.Thread - m 的值：100000000
+```
+
+多次测试结果也并没有变化，说明锁正常运行。
 
 ### 自旋锁
 
