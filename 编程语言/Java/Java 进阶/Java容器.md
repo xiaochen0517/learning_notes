@@ -94,6 +94,7 @@ public interface Iterable<T> {
             action.accept(t);
         }
     }
+    // 查看流式编程相关内容
     default Spliterator<T> spliterator() {
         return Spliterators.spliteratorUnknownSize(iterator(), 0);
     }
@@ -146,7 +147,7 @@ public static final int SUBSIZED   = 0x00004000;
 
 ![image-20220226102419124](photo/73、可分割迭代器接口类结构.png) 
 
-==需要完成流式编程==
+==需要完成流式编程== 
 
 #### 集合接口
 
@@ -557,19 +558,45 @@ public interface List<E> extends Collection<E> {
     // ...
 ```
 
-#### 替换内容
+#### 修改内容
+
+函数式编程，修改元素的内容。
 
 ```java
 default void replaceAll(UnaryOperator<E> operator) {
-    Objects.requireNonNull(operator);
+    Objects.requireNonNull(operator); // 检查是否为空
+    // 获取迭代器
     final ListIterator<E> li = this.listIterator();
+    // 遍历当前集合元素
     while (li.hasNext()) {
+        // 对当前元素进行指定操作
         li.set(operator.apply(li.next()));
     }
 }
 ```
 
+获取到集合的迭代器，遍历所有元素并进行修改，下面是 `UnaryOperator` 接口类的代码。
 
+```java
+@FunctionalInterface
+public interface UnaryOperator<T> extends Function<T, T> {
+    static <T> UnaryOperator<T> identity() {
+        return t -> t;
+    }
+}
+```
+
+可以看到，接口中并没有定义 `apply` 方法，此方法是在其父类 `Function` 接口类中定义的。
+
+```java
+@FunctionalInterface
+public interface Function<T, R> {
+    R apply(T t);
+    // ...
+}
+```
+
+> 容器在很多的数据处理方法中都使用了函数式编程，这也是 JDK 8 最为重要的新特性之一。
 
 #### 自动排序
 
