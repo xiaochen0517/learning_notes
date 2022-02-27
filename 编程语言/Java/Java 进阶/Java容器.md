@@ -94,60 +94,10 @@ public interface Iterable<T> {
             action.accept(t);
         }
     }
-    // 查看流式编程相关内容
-    default Spliterator<T> spliterator() {
-        return Spliterators.spliteratorUnknownSize(iterator(), 0);
-    }
 }
 ```
 
 **迭代器模式** - **提供一种方法顺序访问一个聚合对象中各个元素，而又无须暴露该对象的内部表示**。
-
-#### 拆分器
-
-`Spliterator`（ splitable iterator 可分割迭代器）接口是Java为了**并行**遍历数据源中的元素而设计的迭代器，这个接口与Java提供的顺序遍历迭代器 `Iterator` 相比，一个是顺序遍历，一个是并行遍历。
-
-`Iterator` 是 Java 早期产物，但是由于 CPU 的多核化趋势导致顺序遍历已经无法满足性能需求，于是， `Spliterator` 可分割迭代器应运而生。`Spliterator` 的主要原理就是将一个大任务递归拆分成小任务，将各个小任务分配到不同的核中进行处理，最后将结果合并。==Java7的Fork/Join(分支/合并)框架== 
-
-```java
-// 顺序处理元素
-boolean tryAdvance(Consumer<? super T> action);
-// 将当前集合划分一部分创建一个新的拆分迭代器
-Spliterator<T> trySplit();
-// 剩余多少元素需要遍历
-long estimateSize();
-// ==待定==
-int characteristics();
-```
-
-具体的并行操作就是使用 `trySplit` 对数组进行分割，以便于进行并行操作提高效率。
-
-批量遍历元素，本质使用 `tryAdvance` 方法。
-
-```java
-default void forEachRemaining(Consumer<? super T> action) {
-    do { } while (tryAdvance(action));
-}
-```
-
-参数类型
-
-```java
-public static final int DISTINCT   = 0x00000001;
-public static final int SORTED     = 0x00000004;
-public static final int ORDERED    = 0x00000010;
-public static final int SIZED      = 0x00000040;
-public static final int NONNULL    = 0x00000100;
-public static final int IMMUTABLE  = 0x00000400;
-public static final int CONCURRENT = 0x00001000;
-public static final int SUBSIZED   = 0x00004000;
-```
-
-结构图
-
-![image-20220226102419124](photo/73、可分割迭代器接口类结构.png) 
-
-==需要完成流式编程== 
 
 #### 集合接口
 
@@ -177,21 +127,6 @@ public interface Collection<E> extends Iterable<E> {
     boolean addAll(Collection<? extends E> c);
     // 移除多个元素
     boolean removeAll(Collection<?> c);
-    // 删除满足给条件的此集合的所有元素。 
-    default boolean removeIf(Predicate<? super E> filter) {
-        Objects.requireNonNull(filter);
-        boolean removed = false;
-        // 获取迭代器
-        final Iterator<E> each = iterator();
-        while (each.hasNext()) {
-            // 是否匹配
-            if (filter.test(each.next())) {
-                each.remove();  // 移除元素
-                removed = true;
-            }
-        }
-        return removed;
-    }
     // 移除此集合中没有指定集合中的元素
     boolean retainAll(Collection<?> c);
     // 从此集合中删除所有元素
@@ -200,19 +135,6 @@ public interface Collection<E> extends Iterable<E> {
     boolean equals(Object o);
     // 返回此集合的hash值
     int hashCode();
-
-    @Override
-    default Spliterator<E> spliterator() {
-        return Spliterators.spliterator(this, 0);
-    }
-
-    default Stream<E> stream() {
-        return StreamSupport.stream(spliterator(), false);
-    }
-
-    default Stream<E> parallelStream() {
-        return StreamSupport.stream(spliterator(), true);
-    }
 }
 ```
 
@@ -389,94 +311,99 @@ public abstract class AbstractCollection<E> implements Collection<E> {
 
 #### 排序接口
 
-若某个类实现了 `Comparable` 接口则表示此类是可以被进行比较的，也就可以对此类组成的一个集合进行排序。
+##### Comparable
+
+若某个类实现了 `Comparable` 接口则表示此类是可以被进行比较的，`Comparator` 接口类则可以根据此方法的结果对元素进行排序。
 
 ```java
 public interface Comparable<T> {
-    // 将此对象与指定的对象进行比较以进行排序
+    // 将此对象与指定的对象进行比较
     public int compareTo(T o);
 }
 ```
+
+接下来看一下 `String` 类，已知其是可以进行比较的，查看一下它是如何实现的。
+
+```java
+public final class String implements java.io.Serializable, Comparable<String>, CharSequence {
+```
+
+可以看到 `String` 类实现了 `Comparable` 接口，下面是其 `compareTo` 方法的实现。
+
+```java
+public int compareTo(String anotherString) {
+    // 字符串1的长度
+    int len1 = value.length;
+    // 字符串2的长度
+    int len2 = anotherString.value.length;
+    // 得到其中最小的长度
+    int lim = Math.min(len1, len2);
+    // 字符串1的char数组
+    char v1[] = value;
+    // 字符串2的char数组
+    char v2[] = anotherString.value;
+    // 计数值
+    int k = 0;
+    // 当计数小于最小值时执行循环
+    while (k < lim) {
+        // 字符串1指定下标char
+        char c1 = v1[k];
+        // 字符串2指定下标char
+        char c2 = v2[k];
+        // 如果两个char不相等，直接返回
+        if (c1 != c2) {
+            // ASCII相减
+            return c1 - c2;
+        }
+        k++;
+    }
+    // 最后判断一下两个字符串长度，为0则完全相同，不为0则大小不一
+    return len1 - len2;
+}
+```
+
+使用最小的长度对字符串进行遍历，这里使用最小值是为了防止下标越界，逐个比对字符，如果有不同则直接返回两个字符的 `ASCII` 码的差值。如果遍历完成后全部相等，则需要去判断两个字符串大小是否相等，不相等则表示两个字符串不一样，返回长度的差值。
+
+由于 `String` 无法像 `int` 值一样去判断大小，所以大小是根据 `ASCII` 编码大小和字符串长度判断的，总结下来就是为 0 则相等，不为 0 则不等。
+
+接下来，我们使用一段代码验证我们的分析结论是否正确。
+
+```java
+String a = "我的世界真好玩";
+String b = "我的世界";
+System.out.println(a.compareTo(b));
+String c = "我的键盘";
+String d = "我的笔记本";
+System.out.println(c.compareTo(d));
+char e = '键';
+char f = '笔';
+System.out.println(e-f);
+```
+
+结果
+
+```java
+3
+6682
+6682
+```
+
+可以看到，第一个返回的是两个字符串长度差值，而第二个返回的是 `键` 和 `笔` 两个字的 `ASCII` 码的差值。
+
+##### Comparator
 
 `Comparator` 是比较接口，如果某个没有继承 `Comparable` 类需要排序时，但是其本身并不支持比较，此时就需要实现一个比较器来进行排序，这个比较器只需要实现 `Comparator` 接口即可。
 
 ```java
 public interface Comparator<T> {
-    
+    // 比较大小1大于2返回正数，1小于2返回负数，相等返回0
     int compare(T o1, T o2);
-    
+    // 是否相等
     boolean equals(Object obj);
-    
-    default Comparator<T> reversed() {
-        return Collections.reverseOrder(this);
-    }
-    
-    default Comparator<T> thenComparing(Comparator<? super T> other) {
-        Objects.requireNonNull(other);
-        return (Comparator<T> & Serializable) (c1, c2) -> {
-            int res = compare(c1, c2);
-            return (res != 0) ? res : other.compare(c1, c2);
-        };
-    }
-    
-    default <U> Comparator<T> thenComparing(Function<? super T, ? extends U> keyExtractor, Comparator<? super U> keyComparator) {
-        return thenComparing(comparing(keyExtractor, keyComparator));
-    }
-    
-    default <U extends Comparable<? super U>> Comparator<T> thenComparing(Function<? super T, ? extends U> keyExtractor) {
-        return thenComparing(comparing(keyExtractor));
-    }
-    
-    default Comparator<T> thenComparingInt(ToIntFunction<? super T> keyExtractor) {
-        return thenComparing(comparingInt(keyExtractor));
-    }
-
-    default Comparator<T> thenComparingLong(ToLongFunction<? super T> keyExtractor) {
-        return thenComparing(comparingLong(keyExtractor));
-    }
-    
-    default Comparator<T> thenComparingDouble(ToDoubleFunction<? super T> keyExtractor) {
-        return thenComparing(comparingDouble(keyExtractor));
-    }
-    
-    public static <T extends Comparable<? super T>> Comparator<T> reverseOrder() {
-        return Collections.reverseOrder();
-    }
-    
-    @SuppressWarnings("unchecked")
-    public static <T extends Comparable<? super T>> Comparator<T> naturalOrder() {
-        return (Comparator<T>) Comparators.NaturalOrderComparator.INSTANCE;
-    }
-    
-    public static <T> Comparator<T> nullsFirst(Comparator<? super T> comparator) {
-        return new Comparators.NullComparator<>(true, comparator);
-    }
-    
-    public static <T> Comparator<T> nullsLast(Comparator<? super T> comparator) {
-        return new Comparators.NullComparator<>(false, comparator);
-    }
-    
-    public static <T, U> Comparator<T> comparing(Function<? super T, ? extends U> keyExtractor, Comparator<? super U> keyComparator) {
-        Objects.requireNonNull(keyExtractor);
-        Objects.requireNonNull(keyComparator);
-        return (Comparator<T> & Serializable)
-            (c1, c2) -> keyComparator.compare(keyExtractor.apply(c1),
-                                              keyExtractor.apply(c2));
-    }
-    
-    public static <T, U extends Comparable<? super U>> Comparator<T> comparing(Function<? super T, ? extends U> keyExtractor) {
-        Objects.requireNonNull(keyExtractor);
-        return (Comparator<T> & Serializable)
-            (c1, c2) -> keyExtractor.apply(c1).compareTo(keyExtractor.apply(c2));
-    }
-    
-    public static <T> Comparator<T> comparingInt(ToIntFunction<? super T> keyExtractor) {
-        Objects.requireNonNull(keyExtractor);
-        return (Comparator<T> & Serializable)
-            (c1, c2) -> Integer.compare(keyExtractor.applyAsInt(c1), keyExtractor.applyAsInt(c2));
-    }
 }
 ```
+
+在 Java 8 之前，`Comparator` 接口中只有两个方法，分别是区分大小的 `compare` 方法和区分是否相等 `equals` 方法。剩下的所有方法都是使用 `default` 修饰在 Java 8 中新增的方法，用于实现流式编程。
 
 #### 克隆接口
 
@@ -492,7 +419,7 @@ public interface Cloneable {}
 protected native Object clone() throws CloneNotSupportedException;
 ```
 
-`clone` 方法是一个本地方法，在类未实现 `Cloneable` 接口时调用会抛出 `CloneNotSupportedException` 异常。
+`clone` 方法是一个本地方法，在类未实现 `Cloneable` 接口时调用 `clone` 方法会抛出 `CloneNotSupportedException` 异常。
 
 #### fail-fast
 
@@ -575,7 +502,7 @@ default void replaceAll(UnaryOperator<E> operator) {
 }
 ```
 
-获取到集合的迭代器，遍历所有元素并进行修改，下面是 `UnaryOperator` 接口类的代码。
+获取到集合的迭代器，遍历所有元素并进行修改，此处使用了函数式编程，下面是 `UnaryOperator` 接口类的代码。
 
 ```java
 @FunctionalInterface
@@ -598,14 +525,18 @@ public interface Function<T, R> {
 
 > 容器在很多的数据处理方法中都使用了函数式编程，这也是 JDK 8 最为重要的新特性之一。
 
-#### 自动排序
+#### 排序方法
 
 ```java
 @SuppressWarnings({"unchecked", "rawtypes"})
 default void sort(Comparator<? super E> c) {
+    // 将所有元素转为数组
     Object[] a = this.toArray();
+    // 使用Arrays工具类排序
     Arrays.sort(a, (Comparator) c);
+    // 获取迭代器
     ListIterator<E> i = this.listIterator();
+    // 遍历数组中的元素，将数组中的元素覆盖到容器中
     for (Object e : a) {
         i.next();
         i.set((E) e);
@@ -613,31 +544,32 @@ default void sort(Comparator<? super E> c) {
 }
 ```
 
-
+在这个方法中使用到了比较器接口，核心的排序方法是由 `Arrays` 工具类实现的，会在后面的工具类部分中详细 分析。最后，获取到容器的迭代器，将排序好的数组逐一覆盖到容器中。
 
 #### 常用方法
 
 ```java
+// 获取指定下标元素并返回
 E get(int index);
-
+// 设置指定下标元素为指定对象，返回之前下标位置的元素
 E set(int index, E element);
-
+// 将元素插入到指定下标，如果指定下标存在元素则将其和后面的元素统一后移一位
 void add(int index, E element);
-
+// 删除自动下标的元素，将后面的元素（如果存在）向前移动一位
 E remove(int index);
-
+// 返回指定元素的在容器中第一次匹配的元素下标，如果不存在返回-1
 int indexOf(Object o);
-
+// 返回指定元素在容器中最右一个匹配的元素下标，如果不存在返回-1
 int lastIndexOf(Object o);
-
+// 返回容器的迭代器
 ListIterator<E> listIterator();
-
+// 返回从指定下标开始的迭代器
 ListIterator<E> listIterator(int index);
-
+// 返回指定下标范围的容器，[fromIndex, toIndex)
 List<E> subList(int fromIndex, int toIndex);
 ```
 
-
+下面是获取可拆分迭代器的方法，是用了 `Spliterators` 工具类之后会在工具类部分分析。
 
 ```java
 @Override
@@ -664,4 +596,198 @@ public abstract class AbstractList<E> extends AbstractCollection<E> implements L
 ### 概述
 
 流式编程（ Stream ）是 Java8 的新功能，是对集合等容器对象功能的增强，可以进行各种非常高效的聚合操作（ aggregate operation ）和大批量数据操作（ bulk data operation ）。其与 Lambda 表达式相互结合，极大的提高了容器编程的效率。同时它提供串行和并行两种模式进行汇聚操作，并发模式能够充分利用多核处理器的优势，使用 fork/join 并行方式来拆分任务和加速处理过程。Stream 流式编程还提供了 Stream API ，使用其无需编写并发代码即可使用高并发特性快速解决问题。
+
+
+
+### 使用
+
+
+
+### 解析
+
+
+
+#### 拆分器
+
+在上面的迭代器接口中还有另一个方法没有介绍，因为其是在 Java 8 的流式编程中新增的内容，所以统一在这里介绍。以下是这个方法的代码。
+
+```java
+// 查看流式编程相关内容
+default Spliterator<T> spliterator() {
+    return Spliterators.spliteratorUnknownSize(iterator(), 0);
+}
+```
+
+`Spliterator`（ splitable iterator 可分割迭代器）接口是Java为了**并行**遍历数据源中的元素而设计的迭代器，这个接口与Java提供的顺序遍历迭代器 `Iterator` 相比，一个是顺序遍历，一个是并行遍历。
+
+`Iterator` 是 Java 早期产物，但是由于 CPU 的多核化趋势导致顺序遍历已经无法满足性能需求，于是， `Spliterator` 可分割迭代器应运而生。`Spliterator` 的主要原理就是将一个大任务递归拆分成小任务，将各个小任务分配到不同的核中进行处理，最后将结果合并。==Java7的Fork/Join(分支/合并)框架== 
+
+```java
+// 顺序处理元素
+boolean tryAdvance(Consumer<? super T> action);
+// 将当前集合划分一部分创建一个新的拆分迭代器
+Spliterator<T> trySplit();
+// 剩余多少元素需要遍历
+long estimateSize();
+// ==待定==
+int characteristics();
+```
+
+具体的并行操作就是使用 `trySplit` 对数组进行分割，以便于进行并行操作提高效率。
+
+批量遍历元素，本质使用 `tryAdvance` 方法。
+
+```java
+default void forEachRemaining(Consumer<? super T> action) {
+    do { } while (tryAdvance(action));
+}
+```
+
+参数类型
+
+```java
+public static final int DISTINCT   = 0x00000001;
+public static final int SORTED     = 0x00000004;
+public static final int ORDERED    = 0x00000010;
+public static final int SIZED      = 0x00000040;
+public static final int NONNULL    = 0x00000100;
+public static final int IMMUTABLE  = 0x00000400;
+public static final int CONCURRENT = 0x00001000;
+public static final int SUBSIZED   = 0x00004000;
+```
+
+结构图
+
+![image-20220226102419124](photo/73、可分割迭代器接口类结构.png) 
+
+
+
+#### 集合接口
+
+Java 8 在 `Collection` 接口中添加四个关于流式编程的方法，其都使用 `default` 关键字修饰不需要实现类实现这些方法，也是为了在新增功能时不会大幅度修改继承链中其他类的内容，同时也为了第三方继承相关接口的类不需要修改。
+
+```java
+// 删除满足给条件的此集合的所有元素。 
+default boolean removeIf(Predicate<? super E> filter) {
+    Objects.requireNonNull(filter);
+    boolean removed = false;
+    // 获取迭代器
+    final Iterator<E> each = iterator();
+    while (each.hasNext()) {
+        // 是否匹配
+        if (filter.test(each.next())) {
+            each.remove();  // 移除元素
+            removed = true;
+        }
+    }
+    return removed;
+}
+// 返回可拆分迭代器
+@Override
+default Spliterator<E> spliterator() {
+    return Spliterators.spliterator(this, 0);
+}
+// 返回顺序流
+default Stream<E> stream() {
+    return StreamSupport.stream(spliterator(), false);
+}
+// 返回并行流
+default Stream<E> parallelStream() {
+    return StreamSupport.stream(spliterator(), true);
+}
+```
+
+
+
+#### 排序接口
+
+`Comparator` 
+
+```java
+
+default Comparator<T> reversed() {
+    return Collections.reverseOrder(this);
+}
+
+default Comparator<T> thenComparing(Comparator<? super T> other) {
+    Objects.requireNonNull(other);
+    return (Comparator<T> & Serializable) (c1, c2) -> {
+        int res = compare(c1, c2);
+        return (res != 0) ? res : other.compare(c1, c2);
+    };
+}
+
+default <U> Comparator<T> thenComparing(Function<? super T, ? extends U> keyExtractor, Comparator<? super U> keyComparator) {
+    return thenComparing(comparing(keyExtractor, keyComparator));
+}
+
+default <U extends Comparable<? super U>> Comparator<T> thenComparing(Function<? super T, ? extends U> keyExtractor) {
+    return thenComparing(comparing(keyExtractor));
+}
+
+default Comparator<T> thenComparingInt(ToIntFunction<? super T> keyExtractor) {
+    return thenComparing(comparingInt(keyExtractor));
+}
+
+default Comparator<T> thenComparingLong(ToLongFunction<? super T> keyExtractor) {
+    return thenComparing(comparingLong(keyExtractor));
+}
+
+default Comparator<T> thenComparingDouble(ToDoubleFunction<? super T> keyExtractor) {
+    return thenComparing(comparingDouble(keyExtractor));
+}
+
+public static <T extends Comparable<? super T>> Comparator<T> reverseOrder() {
+    return Collections.reverseOrder();
+}
+
+@SuppressWarnings("unchecked")
+public static <T extends Comparable<? super T>> Comparator<T> naturalOrder() {
+    return (Comparator<T>) Comparators.NaturalOrderComparator.INSTANCE;
+}
+
+public static <T> Comparator<T> nullsFirst(Comparator<? super T> comparator) {
+    return new Comparators.NullComparator<>(true, comparator);
+}
+
+public static <T> Comparator<T> nullsLast(Comparator<? super T> comparator) {
+    return new Comparators.NullComparator<>(false, comparator);
+}
+
+public static <T, U> Comparator<T> comparing(Function<? super T, ? extends U> keyExtractor, Comparator<? super U> keyComparator) {
+    Objects.requireNonNull(keyExtractor);
+    Objects.requireNonNull(keyComparator);
+    return (Comparator<T> & Serializable)
+        (c1, c2) -> keyComparator.compare(keyExtractor.apply(c1),
+                                          keyExtractor.apply(c2));
+}
+
+public static <T, U extends Comparable<? super U>> Comparator<T> comparing(Function<? super T, ? extends U> keyExtractor) {
+    Objects.requireNonNull(keyExtractor);
+    return (Comparator<T> & Serializable)
+        (c1, c2) -> keyExtractor.apply(c1).compareTo(keyExtractor.apply(c2));
+}
+
+public static <T> Comparator<T> comparingInt(ToIntFunction<? super T> keyExtractor) {
+    Objects.requireNonNull(keyExtractor);
+    return (Comparator<T> & Serializable)
+        (c1, c2) -> Integer.compare(keyExtractor.applyAsInt(c1), keyExtractor.applyAsInt(c2));
+}
+```
+
+
+
+## 工具类
+
+### 概述
+
+
+
+### 相关工具类
+
+#### Arrays
+
+
+
+#### Spliterators
 
