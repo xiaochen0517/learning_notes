@@ -476,6 +476,8 @@ Exception in thread "Thread-0" java.util.ConcurrentModificationException
 
 `List` 是容器中的一个大类，代表一个有序的队列，其包含了许多不同实现和数据结构的容器，包括 `ArrayList` 、`LinkedList` 等实现。
 
+![image-20220228170605211](photo/81、List结构图.png) 
+
 ### List
 
 `List` 是一个接口，它继承于 `Collection` 的接口，其中除了 `Collection` 定义的方法外还实现或定义了一些 `List` 独有的方法。
@@ -578,16 +580,644 @@ default Spliterator<E> spliterator() {
 }
 ```
 
-
-
 ### AbstractList
 
+#### 概述
 
+`AbstractList` 继承自 `AbstractCollection` 并实现了 `List` 接口，它是 `ArrayList` 和 `AbstractSequentialList` 类的父类。
 
 ```java
 public abstract class AbstractList<E> extends AbstractCollection<E> implements List<E> {
     // ...
 ```
+
+
+
+![image-20220228093354791](photo/74、AbstractList继承结构.png) 
+
+
+
+#### 迭代器
+
+`AbstractList` 类中最重要的部分就是迭代器的实现，下面的图是迭代器的继承结构图。
+
+![image-20220228094053195](photo/75、AbstractList内部迭代器结构.png) 
+
+##### 父类 Itr
+
+###### 成员变量
+
+```java
+// 指针
+int cursor = 0;
+// 上一次指针位置
+int lastRet = -1;
+// 检测遍历过程中元素是否存在修改，以防并发操作
+int expectedModCount = modCount;
+```
+
+首先第一个变量 `cursor` 是一个指针，其指向当前遍历的元素。另一个变量 `lastRet` 一般是指向当前遍历元素的上一个元素，因此其初始值为 -1 。迭代器初始结构如下图。
+
+![List迭代器结构](photo/76、List迭代器结构.png) 
+
+ 剩余最后的变量用于检测在迭代过程中 `List` 结构是否存在改动，若存在改动则说明存在并发修改，需要抛出并发修改异常。其中 `modCount` 的值会在 `List` 结构发生改动时自增，相关的代码会在分析 `ArrayList` 时看到。
+
+###### 遍历方法
+
+此方法的作用用于判断指针指向的元素是否存在。
+
+```java
+public boolean hasNext() {
+    // 指针位置等于list大小时表示指针已经溢出
+    return cursor != size();
+}
+```
+
+如果指针大小是从 0 到 size-1 的任意值时，说明当前指向的元素是存在的。如果指针的值与当前的size相同，则表示当前指针指向的内容是不存在的，如下图（ 元素数量为 4 ）。
+
+![List迭代器结构1](photo/77、List迭代器遍历完成结构.png) 
+
+`next` 方法用于获取当前指向元素并将指针后移。
+
+```java
+public E next() {
+    // 检查数据结构
+    checkForComodification();
+    try {
+        // 获取指针
+        int i = cursor;
+        // 获取指针上的元素
+        E next = get(i);
+        // 设置上一次指针位置
+        lastRet = i;
+        // 将当前指针后移
+        cursor = i + 1;
+        return next;
+    } catch (IndexOutOfBoundsException e) {
+        checkForComodification();
+        throw new NoSuchElementException();
+    }
+}
+```
+
+获取元素值操作一共有以下几步：
+
+1. 获取指针指向的元素
+2. 设置 `lastRet` 的值
+3. 将指针的值自增（后移）
+4. 返回取出的元素
+
+`checkForComodification` 的代码非常简单，即判断 `modCount` 和在创建迭代器时赋值的 `expectedModCount` 是否相等，如果不相等则表示列表结构发生了变化。
+
+```java
+final void checkForComodification() {
+    if (modCount != expectedModCount)
+        throw new ConcurrentModificationException();
+}
+```
+
+> 注意：抛出 `ConcurrentModificationException` 异常的原因不一定是因为并发，如果自行在遍历过程中使用 `add` 、`remove` 等方法修改列表结构也会触发此异常。
+
+###### 移除元素
+
+移除当前指针上一次指向的元素。
+
+```java
+public void remove() {
+    // 如果指针上一次小于-1，抛出异常
+    if (lastRet < 0)
+        throw new IllegalStateException();
+    // 检查列表结构
+    checkForComodification();
+    try {
+        // 移除指针上一次指向的元素
+        AbstractList.this.remove(lastRet);
+        // 如果指针上一次指向的值小于当前指针的值
+        if (lastRet < cursor)
+            // 当前指针自增
+            cursor--;
+        // 将上一次指针的值修改为-1
+        lastRet = -1;
+        // 将 expectedModCount 的值刷新
+        expectedModCount = modCount;
+    } catch (IndexOutOfBoundsException e) {
+        throw new ConcurrentModificationException();
+    }
+}
+```
+
+此处在代码略微复杂，首先需要判断 `lastRet` 变量的值，如果其小于 0 则说明可能存在两种情况。
+
+1. 迭代器还没有执行 `next` 方法，`lastRet` 处于最初位置。
+2. 在已经执行过 `next` 方法的前期下（即指针不为初始状态），连续进行了多次的 `remove` 方法。
+
+接下来就是移除元素的方法。
+
+1. 使用 `remove` 方法移除 `lastRet` 指向的元素
+2. 如果 `lastRet` 的值小于当前指针的值，将当前指针自减（向前移动）
+3. 将 `lastRet` 的值置为 -1，并将 `expectedModCount` 进行刷新。
+
+在第三步时进行了一次判断，如果 `lastRet` 的值小于当前指针的值将当前指针自减，在分析上面的代码时并没有发现 `lastRet` 的值会有可能小于当前指针的值，这样做的原因将会在子类 `ListItr` 中介绍。
+
+##### 子类 ListItr
+
+###### 构造方法
+
+`ListItr` 类的构造方法可以直接传入值来执行当前指针的初始位置。
+
+```java
+ListItr(int index) {
+    cursor = index;
+}
+```
+
+###### 遍历方法
+
+`hasPrevious` 用于判断指针前是否还存在元素。
+
+```java
+public boolean hasPrevious() {
+    return cursor != 0;
+}
+```
+
+当前指针值为 0 时则表示处于 `List` 的第一个元素，所以返回 `false` 表示指针之前已经没有元素。
+
+`previous` 方法用于获取指针之前的元素。
+
+```java
+public E previous() {
+    // 检查list结构
+    checkForComodification();
+    try {
+        // 获取当前指针之前的坐标
+        int i = cursor - 1;
+        // 获取前面的元素
+        E previous = get(i);
+        // 将lastRet和当前指针都向前移动一位
+        lastRet = cursor = i;
+        // 返回获取到的元素
+        return previous;
+    } catch (IndexOutOfBoundsException e) {
+        checkForComodification();
+        throw new NoSuchElementException();
+    }
+}
+```
+
+此方法的步骤如下：
+
+1. 获取当前指针指向元素的前一个元素的下标
+2. 获取前一个元素的内容
+3. 将 `lastRet` 的值和当前指针的值都修改为前一个元素的下标
+4. 返回获取到的元素
+
+此方法在获取指针前一个元素时，会将 `lastRet` 和 `cursor` 的值都修改为上一个元素的下标，所以此时 `lastRet` 和 `cursor` 的值相等。所以在调用此方法之后再去调用上面的 `Itr` 类中的 `remove` 方法时，在 `if (lastRet < cursor)` 判断中就不必修改 `cursor` 的值，直接重置 `lastRet` 的值即可。
+
+如下，`List` 中有四个元素原本 `cursor` 指向的是 four 元素值为 4 ，执行 `previous` 方法后 `cursor` 和 `lastRet` 值都变为 3 。
+
+![List迭代器结构2](photo/78、List迭代器pre和remove.png) 
+
+接着在执行 `remove` 方法，此时 `lastRet` 的值为 3 于是移除元素 three ，此时 `cursor` 的值并不用修改依旧为 3 即可，在删除 three 元素之后， four 元素会自动成为第三个元素。
+
+![List迭代器结构3](photo/79、List迭代器pre和remove.png) 
+
+获取当前指针的值。
+
+```java
+public int nextIndex() {
+    return cursor;
+}
+```
+
+获取当前指针指向的前一个的元素下标。
+
+```java
+public int previousIndex() {
+    return cursor-1;
+}
+```
+
+###### 修改元素
+
+修改指针上一个元素。
+
+```java
+public void set(E e) {
+    // 如果之前的元素为-1，抛出错误
+    if (lastRet < 0)
+        throw new IllegalStateException();
+    checkForComodification();
+
+    try {
+        // 设置元素
+        AbstractList.this.set(lastRet, e);
+        expectedModCount = modCount;
+    } catch (IndexOutOfBoundsException ex) {
+        throw new ConcurrentModificationException();
+    }
+}
+```
+
+修改的是 `lastRet` 下标的元素，所以在执行 `previous` 方法之后，修改的元素就是当前 `cursor` 指向的元素。
+
+在指针之前添加一个元素。
+
+```java
+public void add(E e) {
+    checkForComodification();
+    try {
+        int i = cursor;
+        // 在指针位置添加元素
+        AbstractList.this.add(i, e);
+        // lastRet值重置
+        lastRet = -1;
+        // 指针加一，还是指向原来的元素
+        cursor = i + 1;
+        // 刷新expectedModCount
+        expectedModCount = modCount;
+    } catch (IndexOutOfBoundsException ex) {
+        throw new ConcurrentModificationException();
+    }
+}
+```
+
+`add` 方法其实是在指针的下标处添加元素后再将指针后移一位，保证其指向的还是之前的元素，从而实现在指针前添加元素的效果。
+
+##### 总结
+
+`Itr` 类只可以从前到后遍历元素，且无法指定开始时的指针位置，可以使用 `remove` 删除元素。
+
+`ListItr` 继承了 `Itr` 类的所有功能，并在此基础上可以在构造方法中传参指定开始遍历的起始位置，并可以进行反向遍历，使用 `set` 和 `add` 方法修改和添加元素。
+
+在 `AbstractList` 类中有三个方法，分别用来获取不同状态的迭代器。
+
+```java
+public Iterator<E> iterator() {
+    return new Itr();
+}
+public ListIterator<E> listIterator() {
+    return listIterator(0);
+}
+public ListIterator<E> listIterator(final int index) {
+    rangeCheckForAdd(index);
+    return new ListItr(index);
+}
+```
+
+#### 方法解析
+
+在 `AbstractList` 类中 `add` 、`set` 和 `remove` 方法没有实现，只是直接抛出 `UnsupportedOperationException` 异常，但是也并没有要求子类必须实现，但是子类需要实现这些功能就需要重写相关方法。
+
+而 `AbstractList::get(int)` 和接口类的 `List::size()` 方法必须要在子类中实现。
+
+##### 查询元素
+
+首先是查询元素相关的方法，一共有两个分别是 `indexOf` （第一个匹配的元素）和 `lastIndexOf`（倒数第一个匹配的元素）。
+
+```java
+public int indexOf(Object o) {
+    // 获取迭代器
+    ListIterator<E> it = listIterator();
+    // 如果查询的元素是null
+    if (o==null) {
+        // 循环查询第一个为null的元素
+        while (it.hasNext())
+            if (it.next()==null)
+                // 返回查询到的下标
+                return it.previousIndex();
+    } else {
+        // 循环查询元素
+        while (it.hasNext())
+            if (o.equals(it.next()))
+                // 返回第一个匹配元素下标
+                return it.previousIndex();
+    }
+    // 未查询到返回 -1
+    return -1;
+}
+```
+
+遍历 `List` 返回匹配元素的下标，查询值为空时直接使用 `== ` 匹配 `null` 值，否则使用对象的 `equals` 方法。在匹配到元素时使用 `previousIndex` 方法返回，此方法在上方的 `ListItr` 类中已经分析，返回的是当前指针减一的值，及使用 `it.next()` 获取到的元素的下标。
+
+```java
+public int lastIndexOf(Object o) {
+    // 迭代器，指针在List尾部
+    ListIterator<E> it = listIterator(size());
+    if (o==null) {
+        // 反向遍历
+        while (it.hasPrevious())
+            if (it.previous()==null)
+                // 返回匹配值
+                return it.nextIndex();
+    } else {
+        // 反向遍历
+        while (it.hasPrevious())
+            if (o.equals(it.previous()))
+                // 返回匹配值
+                return it.nextIndex();
+    }
+    // 无匹配元素
+    return -1;
+}
+```
+
+`lastIndexOf` 方法与上面的方法基本相同，只是此方法从 `List` 的最后一个元素来反向遍历，使用 `hasPrevious` 和 `previous` 方法配合，并返回指针的值即元素下标。
+
+##### 批量修改
+
+`clear` 方法用来清除 `List` 中的所有元素，其直接调用了 `removeRange` 方法。
+
+```java
+public void clear() {
+    removeRange(0, size());
+}
+```
+
+下面是 `removeRange` 方法的源码。
+
+```java
+protected void removeRange(int fromIndex, int toIndex) {
+    // 使用删除起始下标获取迭代器
+    ListIterator<E> it = listIterator(fromIndex);
+    // 循环到删除结束下标结束
+    for (int i=0, n=toIndex-fromIndex; i<n; i++) {
+        it.next(); // 将指针后移
+        it.remove(); // 移除指针上一次指向的元素
+    }
+}
+```
+
+使用遍历的方法从 `fromIndex` 开始到 `toIndex` 逐个删除元素，其中 `remove` 方法在 `Itr` 类中。`clear` 方法就是从 0 开始，逐一删除元素直到删除完所有元素。
+
+`addAll` 方法用于将传入的 `Collection` 插入到指定的下标元素之前。==此处有疑惑，需要进一步确认== 
+
+```java
+public boolean addAll(int index, Collection<? extends E> c) {
+    // 检查下标是否合法
+    rangeCheckForAdd(index);
+    boolean modified = false;
+    // 遍历传入的集合
+    for (E e : c) {
+        // 将元素按原来的顺序逐个添加到指定下标
+        add(index++, e);
+        // 只要有一个修改则返回 true 表示存在改动
+        modified = true;
+    }
+    return modified;
+}
+```
+
+首先使用 `rangeCheckForAdd` 检查传入的 `index` 是否合法，然后使用 `for` 循环遍历所有元素，并按顺序将元素逐一添加到 `List` 中。
+
+##### 异常检查
+
+检查 `index` 是否合法。
+
+```java
+private void rangeCheckForAdd(int index) {
+    if (index < 0 || index > size())
+        throw new IndexOutOfBoundsException(outOfBoundsMsg(index));
+}
+```
+
+传入的下标必须大于等于0且小于 `List` 中元素的数量，否则抛出数组下标越界异常，并将越界时的信息同时输出。
+
+```java
+private String outOfBoundsMsg(int index) {
+    return "Index: "+index+", Size: "+size();
+}
+```
+
+输出两个信息，当前越界的下标 `index` 和元素数量 `size` 。
+
+### 截取List
+
+#### 概述
+
+在 `AbstractList` 类中有一个名为 `subList` 的方法，调用了 `SubList` 和 `RandomAccessSubList` 类，而这个两个类都在 `AbstractList.java` 文件中定义，以下是方法代码和类继承结构图。
+
+```java
+public List<E> subList(int fromIndex, int toIndex) {
+    return (this instanceof RandomAccess ?
+            new RandomAccessSubList<>(this, fromIndex, toIndex) :
+            new SubList<>(this, fromIndex, toIndex));
+}
+```
+
+继承结构图：
+
+![image-20220228143342830](photo/80、SubList继承结构.png) 
+
+可以看到在方法中使用了 `instanceof` 关键字来判断当前对象是否实现 `RandomAccess` 接口，如果实现则实例化 `RandomAccessSubList` 类，如果没有则实例化 `SubList` 类。
+
+下面是 `RandomAccess` 接口
+
+```java
+public interface RandomAccess {}
+```
+
+可以看到此接口并没有任何定义，只是用来标记数据是否可以被高速随机访问。
+
+`SubList` 类主要用来分隔 `List` 中的元素，可以将指定下标范围的 `List` 元素作为一个新的 `List` 操作，并在其中通过偏移量 `offset` 来对 `List` 进行增删改查各种操作。
+
+#### SubList
+
+##### 成员变量
+
+```java
+private final AbstractList<E> l;
+private final int offset;
+private int size;
+```
+
+
+
+##### 构造方法
+
+```java
+SubList(AbstractList<E> list, int fromIndex, int toIndex) {
+    if (fromIndex < 0)
+        throw new IndexOutOfBoundsException("fromIndex = " + fromIndex);
+    if (toIndex > list.size())
+        throw new IndexOutOfBoundsException("toIndex = " + toIndex);
+    if (fromIndex > toIndex)
+        throw new IllegalArgumentException("fromIndex(" + fromIndex + ") > toIndex(" + toIndex + ")");
+    l = list;
+    offset = fromIndex;
+    size = toIndex - fromIndex;
+    this.modCount = l.modCount;
+}
+```
+
+
+
+##### 增删改查
+
+###### 增加
+
+```java
+public void add(int index, E element) {
+    rangeCheckForAdd(index);
+    checkForComodification();
+    l.add(index+offset, element);
+    this.modCount = l.modCount;
+    size++;
+}
+```
+
+
+
+```java
+public boolean addAll(Collection<? extends E> c) {
+    return addAll(size, c);
+}
+
+public boolean addAll(int index, Collection<? extends E> c) {
+    rangeCheckForAdd(index);
+    int cSize = c.size();
+    if (cSize==0)
+        return false;
+
+    checkForComodification();
+    l.addAll(offset+index, c);
+    this.modCount = l.modCount;
+    size += cSize;
+    return true;
+}
+```
+
+
+
+###### 删除
+
+```java
+public E remove(int index) {
+    rangeCheck(index);
+    checkForComodification();
+    E result = l.remove(index+offset);
+    this.modCount = l.modCount;
+    size--;
+    return result;
+}
+```
+
+
+
+```java
+protected void removeRange(int fromIndex, int toIndex) {
+    checkForComodification();
+    l.removeRange(fromIndex+offset, toIndex+offset);
+    this.modCount = l.modCount;
+    size -= (toIndex-fromIndex);
+}
+```
+
+
+
+###### 修改
+
+```java
+public E set(int index, E element) {
+    rangeCheck(index);
+    checkForComodification();
+    return l.set(index+offset, element);
+}
+```
+
+
+
+
+
+###### 查询
+
+```java
+public E get(int index) {
+    rangeCheck(index);
+    checkForComodification();
+    return l.get(index+offset);
+}
+```
+
+
+
+##### 迭代器
+
+###### 创建流程
+
+```java
+public Iterator<E> iterator() {
+    return listIterator();
+}
+```
+
+
+
+```java
+public ListIterator<E> listIterator(final int index) {
+    checkForComodification();
+    rangeCheckForAdd(index);
+
+    return new ListIterator<E>() {
+        // code ...
+    }
+}
+```
+
+
+
+###### 指针信息
+
+
+
+```java
+public int nextIndex() {
+    return i.nextIndex() - offset;
+}
+```
+
+
+
+```java
+public int previousIndex() {
+    return i.previousIndex() - offset;
+}
+```
+
+
+
+###### 正向遍历
+
+
+
+```java
+public boolean hasNext() {
+    return nextIndex() < size;
+}
+```
+
+
+
+```java
+public E next() {
+    if (hasNext())
+        return i.next();
+    else
+        throw new NoSuchElementException();
+}
+```
+
+
+
+###### 反向遍历
+
+
+
+###### 增删改查
+
+
+
+#### RandomAccessSubList
 
 
 
