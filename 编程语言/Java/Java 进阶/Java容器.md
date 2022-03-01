@@ -81,23 +81,22 @@ hello
 
 #### 迭代器
 
+##### Iterable
+
 `Iterable` 定义了迭代器模式，用于遍历容器中的元素。
 
 ```java
 public interface Iterable<T> {
     // 获取迭代器
     Iterator<T> iterator();
-    // 顺序迭代元素，并对元素执行指定的操作
-    default void forEach(Consumer<? super T> action) {
-        Objects.requireNonNull(action);
-        for (T t : this) {
-            action.accept(t);
-        }
-    }
 }
 ```
 
 **迭代器模式** - **提供一种方法顺序访问一个聚合对象中各个元素，而又无须暴露该对象的内部表示**。
+
+##### Iterator
+
+
 
 #### 集合接口
 
@@ -468,7 +467,7 @@ Exception in thread "Thread-0" java.util.ConcurrentModificationException
 	at com.mochen.advance.container.FailFastDemo.lambda$main$0(FailFastDemo.java:21)
 ```
 
-可以看到此操作触发了 `fail-fast` 机制，抛出了 `ConcurrentModificationException` 异常。解决方法也很简单，在修改和读取中的代码中加入 `synchronized` 关键字或者使用锁同步，也可以使用 `juc` 包下的并发容器。后续会在 `ArrayList` 的分析中详解。
+可以看到此操作触发了 `fail-fast` 机制，抛出了 `ConcurrentModificationException` 异常。解决方法也很简单，在修改和读取中的代码中加入 `synchronized` 关键字或者使用锁同步，也可以使用 `juc` 包下的并发容器。后续会在 `List` 的分析中详解。
 
 ## List
 
@@ -676,7 +675,9 @@ final void checkForComodification() {
 }
 ```
 
-> 注意：抛出 `ConcurrentModificationException` 异常的原因不一定是因为并发，如果自行在遍历过程中使用 `add` 、`remove` 等方法修改列表结构也会触发此异常。
+此方法就是集合 `fail-fast` 功能的实现，通过比对之前储存的结构数据和当前的结构数据来判断集合是否存在修改，如果存在修改则会抛出 `ConcurrentModificationException` 异常。
+
+> 注意：抛出 `ConcurrentModificationException` 异常的原因不一定绝对是因为并发，如果自行在遍历过程中使用 `add` 、`remove` 等方法修改列表结构也会触发此异常。
 
 ###### 移除元素
 
@@ -991,7 +992,7 @@ private String outOfBoundsMsg(int index) {
 
 输出两个信息，当前越界的下标 `index` 和元素数量 `size` 。
 
-### 截取List
+### 子List
 
 #### 概述
 
@@ -1284,15 +1285,119 @@ class RandomAccessSubList<E> extends SubList<E> implements RandomAccess {
 
 ### ArrayList
 
+#### 概述
+
+`ArrayList` 是一个可以动态扩容的数组，本质上存取数据的方式依旧是 Java 的基础数据类型之一——数组。`ArrayList` 并不是线程安全的，在多线程的情况下会触发集合的 `fail-fast` 功能。
+
+![image-20220301200838352](photo/83、ArrayList内部结构图.png) 
+
+#### 迭代器
+
+`ArrayList` 中也实现了迭代器的相关类，包括 `Itr` 和 `ListItr` 类，功能上来说与 `AbstractList` 类中的功能相同只是更加细化。
+
+#### 分析
+
+##### 继承结构
+
+```java
+public class ArrayList<E> extends AbstractList<E> implements List<E>, RandomAccess, Cloneable, java.io.Serializable {
+```
+
+`ArrayList` 的继承结构图在上方已经给出，其最终继承了 `AbstractList` 类并实现了 `List` 、`RandomAccess` 和 `Cloneable` 接口。
+
+##### 成员变量
+
+```java
+// 集合起始默认的数组长度
+private static final int DEFAULT_CAPACITY = 10;
+// 静态常量，用于给elementData赋值
+private static final Object[] EMPTY_ELEMENTDATA = {};
+private static final Object[] DEFAULTCAPACITY_EMPTY_ELEMENTDATA = {};
+// 真正储存数据的数组
+transient Object[] elementData; // non-private to simplify nested class access
+// 集合中元素的数量
+private int size;
+```
 
 
-## 流式编程
+
+##### 构造函数
+
+`ArrayList` 类有三个构造方法。
+
+无参构造方法。
+
+```java
+public ArrayList() {
+    this.elementData = DEFAULTCAPACITY_EMPTY_ELEMENTDATA;
+}
+```
+
+
+
+制定初始化时数组大小构造方法
+
+
+```java
+public ArrayList(int initialCapacity) {
+    // 参数大于0
+    if (initialCapacity > 0) {
+        // 创建一个制定大小的数组
+        this.elementData = new Object[initialCapacity];
+    } else if (initialCapacity == 0) {
+        // 将空数组赋值
+        this.elementData = EMPTY_ELEMENTDATA;
+    } else {
+        // 小于0抛出异常
+        throw new IllegalArgumentException("Illegal Capacity: "+ initialCapacity);
+    }
+}
+```
+
+
+
+
+```java
+public ArrayList(Collection<? extends E> c) {
+    // 将传入的集合转为数组
+    Object[] a = c.toArray();
+    // 当数组的大小不为0则表示其中有元素
+    if ((size = a.length) != 0) {
+        // 如果传入的集合也是一个ArrayList集合就直接赋值
+        if (c.getClass() == ArrayList.class) {
+            elementData = a;
+        } else {
+            // 如果不是则需要使用工具类的copyOf方法赋值
+            elementData = Arrays.copyOf(a, size, Object[].class);
+        }
+    } else {
+        // 如果大小为0则表示这是一个空集合，直接将本集合设置为一个空数组
+        elementData = EMPTY_ELEMENTDATA;
+    }
+}
+```
+
+
+
+##### 
+
+
+
+## Java 8
 
 ### 概述
 
-流式编程（ Stream ）是 Java8 的新功能，是对集合等容器对象功能的增强，可以进行各种非常高效的聚合操作（ aggregate operation ）和大批量数据操作（ bulk data operation ）。其与 Lambda 表达式相互结合，极大的提高了容器编程的效率。同时它提供串行和并行两种模式进行汇聚操作，并发模式能够充分利用多核处理器的优势，使用 fork/join 并行方式来拆分任务和加速处理过程。Stream 流式编程还提供了 Stream API ，使用其无需编写并发代码即可使用高并发特性快速解决问题。
+在 Java 8 新增了两个非常重要的新特性，即函数式编程 `Lambda` 函数和流式编程。
 
+#### 函数式编程
 
+通过函数式编程可以非常简单实现对集合的统一操作，可以在统一操作时省略大部分的循环遍历等操作，极大的提升了代码的整洁性和可读性。
+
+#### 流式编程
+
+流式编程（ Stream Programing ）是 Java8 的新功能，是对集合等容器对象功能的增强，可以进行各种非常高效的聚合操作（ aggregate operation ）和大批量数据操作（ bulk data operation ）。极大的提高了容器编程的效率。同时它提供串行和并行两种模式进行汇聚操作，并发模式能够充分利用多核处理器的优势，使用 fork/join 并行方式来拆分任务和加速处理过程。Stream 流式编程还提供了 Stream API ，使用其无需编写并发代码即可使用高并发特性快速解决问题。
+
+> 由于 Java 的接口类中定义的方法必须由实现类来实现，原本的容器相关类的发布版本是及其古老的 JDK 1.2 所以在 1.8 中修改上层的接口类时，如果直接定义方法那么下层的实现类都必须去实现。这样操作会直接使得代码修改成本急剧增加，更不用说还有第三方实现相关接口的类，如果其升级了新版的 JDK 就会直接导致编译错误，更加得不偿失。于是 JDK 的开发团队在接口中定义这些方法时都使用的 `default` 关键字，此关键字定义的方法不会强制要求其在实现类中进行实现，而是实不实现均可，如此就解决了新增功能的问题。因此，我们也可以在源码中多处看到，注释中标识了 `since 1.8` 的方法基本都是由 `default` 关键字修饰的。
 
 ### 使用
 
@@ -1300,11 +1405,21 @@ class RandomAccessSubList<E> extends SubList<E> implements RandomAccess {
 
 ### 解析
 
+#### 迭代器
+
+在上面的 `Iterable` 迭代器接口中还有两个 Java 8 新增的方法没有介绍。
+
+```java
+// 顺序迭代元素，并对元素执行指定的操作
+default void forEach(Consumer<? super T> action) {
+    Objects.requireNonNull(action);
+    for (T t : this) {
+        action.accept(t);
+    }
+}
+```
 
 
-#### 拆分器
-
-在上面的迭代器接口中还有另一个方法没有介绍，因为其是在 Java 8 的流式编程中新增的内容，所以统一在这里介绍。以下是这个方法的代码。
 
 ```java
 // 查看流式编程相关内容
@@ -1359,7 +1474,7 @@ public static final int SUBSIZED   = 0x00004000;
 
 #### 集合接口
 
-Java 8 在 `Collection` 接口中添加四个关于流式编程的方法，其都使用 `default` 关键字修饰不需要实现类实现这些方法，也是为了在新增功能时不会大幅度修改继承链中其他类的内容，同时也为了第三方继承相关接口的类不需要修改。
+Java 8 在 `Collection` 接口中添加的四个关于流式编程的方法。
 
 ```java
 // 删除满足给条件的此集合的所有元素。 
