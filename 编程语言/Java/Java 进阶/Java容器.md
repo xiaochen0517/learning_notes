@@ -1026,8 +1026,11 @@ public interface RandomAccess {}
 ##### 成员变量
 
 ```java
+// AbstractList实例，用来储存原先的list对象
 private final AbstractList<E> l;
+// 偏移量
 private final int offset;
+// List元素数量
 private int size;
 ```
 
@@ -1035,38 +1038,77 @@ private int size;
 
 ##### 构造方法
 
+使用 `List` 的指定下标提取一个 `SubList` 用来进行操作。
+
 ```java
 SubList(AbstractList<E> list, int fromIndex, int toIndex) {
+    // 起始值不可小于0
     if (fromIndex < 0)
         throw new IndexOutOfBoundsException("fromIndex = " + fromIndex);
+    // 结束值不可大于list的元素数量
     if (toIndex > list.size())
         throw new IndexOutOfBoundsException("toIndex = " + toIndex);
+    // 起始值不可大于结束值
     if (fromIndex > toIndex)
         throw new IllegalArgumentException("fromIndex(" + fromIndex + ") > toIndex(" + toIndex + ")");
+    // 将要截取的list传入类的成员变量中
     l = list;
+    // 将起始值设为偏移量
     offset = fromIndex;
+    // 结束值减去起始值就是sublist的大小
     size = toIndex - fromIndex;
+    // 这里的modCount是父类AbstractList中的值
     this.modCount = l.modCount;
 }
 ```
 
-
+首先检查传入的参数值是否合法，使用类中的成员变量 `l` 来储存实际的 `List` ，通过 `offset` 和 `size` 分别储存子列表的之于原列表的偏移值与大小。最后是将 `modCount` 的值赋值到本类中，如果当前类中的 `modCount` 和 `list` 对象中的值无法匹配，则需要抛出并发异常。
 
 ##### 增删改查
 
 ###### 增加
 
+增加元素
+
 ```java
 public void add(int index, E element) {
+    // 检查index是否合法
     rangeCheckForAdd(index);
+    // 检查结构是否变化
     checkForComodification();
+    // 在向sublist中添加元素时需要加上偏移值
     l.add(index+offset, element);
+    // 刷新结构更新值
     this.modCount = l.modCount;
+    // list大小加一
     size++;
 }
 ```
 
+可以看到起始对子列表的修改其实就是，将传入的值与偏移值运算之后对原列表进行修改。如果一个列表中有 12 个元素，其中要取从下标 3 到 9 的元素作为 `subList` 此时，对象的内容如下。
 
+![SubList结构](photo/82、SubList结构图.png) 
+
+在上面的图中，黄色方块代表一个元素，黄色方块上方的标号代表 `SubList` 的下标。而起始值 `fromIndex` 和 `toIndex` 分别是 3 和 9 ，经过赋值计算后 `SubList` 对象中的 `offset` 和 `size` 变量分别是 3 和 6 。
+
+如果我们需要改变下标为 2 的子列表的内容，在传入 2 之后其会和 `offset` 相加，此时真正修改的是原列表下标为 5 的元素。
+
+> 注意：在 `SubList` 中是不包括 `toIndex` 下标的元素的，也就是 `[fromIndex, toIndex)` 只是在添加功能中可以在元素末尾进行新增元素。
+
+在 `SubList` 对象中，检查数据是否合法的这两个方法已经被重写，下面是源码。
+
+```java
+private void rangeCheckForAdd(int index) {
+    if (index < 0 || index > size)
+        throw new IndexOutOfBoundsException(outOfBoundsMsg(index));
+}
+private void checkForComodification() {
+    if (this.modCount != l.modCount)
+        throw new ConcurrentModificationException();
+}
+```
+
+批量新增方法
 
 ```java
 public boolean addAll(Collection<? extends E> c) {
@@ -1074,72 +1116,101 @@ public boolean addAll(Collection<? extends E> c) {
 }
 
 public boolean addAll(int index, Collection<? extends E> c) {
+    // 检查index
     rangeCheckForAdd(index);
+    // 获取传入集合的size
     int cSize = c.size();
     if (cSize==0)
+        // 如果大小为0直接返回false
         return false;
-
+    // 检查结构是否有变化
     checkForComodification();
+    // 使用list中的addAll方法执行真正的添加操作
     l.addAll(offset+index, c);
+    // 将结构修改计数器刷新
     this.modCount = l.modCount;
+    // 刷新子列表的大小
     size += cSize;
     return true;
 }
 ```
 
-
+`SubList` 对象中的实际新增是由 `List` 中的新增方法实现的，其只是在传入的子列表的下标基础上计算出原列表的下标，并更新子列表中的计数值。
 
 ###### 删除
 
 ```java
 public E remove(int index) {
+    // 检查index
     rangeCheck(index);
+    // 检查结构更改
     checkForComodification();
+    // 移除元素
     E result = l.remove(index+offset);
+    // 刷新子列表修改计数值
     this.modCount = l.modCount;
+    // 元素计数自减
     size--;
+    // 返回删除的元素
     return result;
 }
 ```
 
+在这个方法中需要注意的是，检查传入下标值合法性的方法与增加元素方法中的不是同一个方法，在添加时是可以在 `toIndex` 的位置添加内容的，但是 `SubList` 从原理来讲是不包含 `toIndex` 的元素的，所以在除了新增的情况下，其余所有操作都需要将下标限制在 `toIndex` 之内的。
 
+```java
+private void rangeCheck(int index) {
+    if (index < 0 || index >= size)
+        throw new IndexOutOfBoundsException(outOfBoundsMsg(index));
+}
+```
+
+批量移除
 
 ```java
 protected void removeRange(int fromIndex, int toIndex) {
+    // 检查结构变化
     checkForComodification();
+    // 区间移除
     l.removeRange(fromIndex+offset, toIndex+offset);
+    // 更新结构变化计数值
     this.modCount = l.modCount;
+    // 更新子列表大小
     size -= (toIndex-fromIndex);
 }
 ```
 
-
+使用 `List::removeRange()` 方法进行批量移除，之后更新子列表中计数变量。
 
 ###### 修改
 
 ```java
 public E set(int index, E element) {
+    // 检查index
     rangeCheck(index);
+    // 检查结构变化
     checkForComodification();
+    // 设置元素值
     return l.set(index+offset, element);
 }
 ```
 
-
-
-
+使用 `List::set()` 方法进行修改元素，由于修改元素之后列表的大小和结构都没有变化，所以不需要跟新计数值。
 
 ###### 查询
 
 ```java
 public E get(int index) {
+    // 检查index
     rangeCheck(index);
+    // 检查结构变化
     checkForComodification();
+    // 获取值并返回
     return l.get(index+offset);
 }
 ```
 
-
+使用 `List::get()` 方法获取并返回元素。
 
 ##### 迭代器
 
@@ -1147,77 +1218,71 @@ public E get(int index) {
 
 ```java
 public Iterator<E> iterator() {
+    // 调用另一个方法
     return listIterator();
 }
 ```
 
-
+下面是真正创建迭代器的方法。
 
 ```java
 public ListIterator<E> listIterator(final int index) {
+    // 检查数据
     checkForComodification();
     rangeCheckForAdd(index);
-
+    // 使用匿名内部类的方式创建
     return new ListIterator<E>() {
         // code ...
     }
 }
 ```
 
+在子列表中迭代器是使用匿名内部类创建的。
 
+###### 成员变量
+
+```java
+private final ListIterator<E> i = l.listIterator(index+offset);
+```
+
+此处使用的方式和 `SubList` 中使用的方法很相似，都是直接使用原来的列表，在操作是使用偏移值进行计算，然后直接修改原列表中的元素。
 
 ###### 指针信息
 
-
-
 ```java
+// 获取当前指针的值
 public int nextIndex() {
     return i.nextIndex() - offset;
 }
-```
-
-
-
-```java
+// 获取指针的上一个元素的下标
 public int previousIndex() {
     return i.previousIndex() - offset;
 }
 ```
 
+在使用这两个方法获取指针信息时使用的是原列表的同样方法，获取到的值（下标）是基于原列表的值，需要将其转换为子列表的值（下标），所以需要使用获取到的值减去偏移量。
 
-
-###### 正向遍历
-
-
-
-```java
-public boolean hasNext() {
-    return nextIndex() < size;
-}
-```
-
-
-
-```java
-public E next() {
-    if (hasNext())
-        return i.next();
-    else
-        throw new NoSuchElementException();
-}
-```
-
-
-
-###### 反向遍历
-
-
-
-###### 增删改查
-
-
+剩余的方法与 `List` 中的方法逻辑相同，就不再进行分析。
 
 #### RandomAccessSubList
+
+可以高速随机访问的列表。
+
+```java
+class RandomAccessSubList<E> extends SubList<E> implements RandomAccess {
+    RandomAccessSubList(AbstractList<E> list, int fromIndex, int toIndex) {
+        super(list, fromIndex, toIndex);
+    }
+
+    public List<E> subList(int fromIndex, int toIndex) {
+        return new RandomAccessSubList<>(this, fromIndex, toIndex);
+    }
+}
+```
+
+此方法中并没有新增任何实际的功能，仅实现类 `RandomAccess` 接口表示此 `List` 可以被直接随机访问。
+
+### ArrayList
 
 
 
