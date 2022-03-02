@@ -1318,6 +1318,8 @@ private static final Object[] DEFAULTCAPACITY_EMPTY_ELEMENTDATA = {};
 transient Object[] elementData; // non-private to simplify nested class access
 // 集合中元素的数量
 private int size;
+// 数组可以容纳元素的最大值
+private static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8;
 ```
 
 
@@ -1386,47 +1388,106 @@ public ArrayList(Collection<? extends E> c) {
 
 ###### 单个新增
 
-
+在数组末尾新增元素。
 
 ```java
 public boolean add(E e) {
+    // 检查数组的大小，并确实是否扩容，此方法中modCount已自增
     ensureCapacityInternal(size + 1);  // Increments modCount!!
+    // 将指定的元素放入列表的末尾
     elementData[size++] = e;
+    // 返回成功
     return true;
 }
 ```
 
+在添加元素时需要检查 `ArrayList` 对象中的数组对象的大小是否可以容纳下新增的元素，如果容纳不下就需要对数组进行扩容处理，下面的数组扩容部分详细分析了这部分的代码。
 
+在指定下标新增元素。
 
 ```java
 public void add(int index, E element) {
+    // 检查index是否合法
     rangeCheckForAdd(index);
-
+    // 检查数组容量
     ensureCapacityInternal(size + 1);  // Increments modCount!!
+    // 将要添加位置后面的数组向后移动一位
+    // 参数描述：源数组、源数组起始下标、目标数组、目标数组起始下标、需要移动数组的长度
     System.arraycopy(elementData, index, elementData, index + 1, size - index);
+    // 将移出的空位中的元素修改为要添加的元素
     elementData[index] = element;
+    // 元素量加一
     size++;
 }
 ```
 
+因为需要传入下标所以需要先检查下标的是否合法，此方法比上面还增加了一步操作，其需要将数组中需要添加元素的下标及之后的元素统一后移一位，然后再在指定的下标放置元素。
 
+此处使用到的 `System::arraycopy()` 方法是一个本地方法，此方法接受五个参数上方代码中已经注明，此方法会抛出三种类型的异常。
+
+- IndexOutOfBoundsException：复制时访问的下标越界。
+- ArrayStoreException：源数组与目标数组之间的类型不匹配。
+- NullPointerException：源数组与目标数组有一个为 null 。
+
+检查添加输入下标是否合法。
 
 ```java
+private void rangeCheckForAdd(int index) {
+    if (index > size || index < 0)
+        throw new IndexOutOfBoundsException(outOfBoundsMsg(index));
+}
+```
+
+因为在添加元素时是可以向数组最后添加元素的，所以 `index` 可以为 `size` 。
+
+###### 数组扩容
+
+可以外部调用设置最小容量的方法。
+
+```java
+public void ensureCapacity(int minCapacity) {
+    // 判断创建对象时是否使用的是无参构造
+    int minExpand = (elementData != DEFAULTCAPACITY_EMPTY_ELEMENTDATA)
+        // 如果使用的不是无参构造
+        ? 0
+        // 使用的是无参构造，且无元素
+        : DEFAULT_CAPACITY;
+    // 如果要设置的大小大于当前计算出的最小大小
+    if (minCapacity > minExpand) {
+        // 检查大小值并决定最终是否需要扩容
+        ensureExplicitCapacity(minCapacity);
+    }
+}
+```
+
+此处判断的是当前储存元素的数组 `elementData` 变量是否与 `DEFAULTCAPACITY_EMPTY_ELEMENTDATA` 常量相等，与其相等只有一种可能便是使用无参构造实例化对象。但是如果在实例化对象之后，如果添加了元素就会执行下面的元素扩容方法（因为赋值的常量数组大小为 0 是一个空数组），在其中的 `Arrays.copyOf()` 方法之后 `elementData` 变量会引用一个新的数组，于是在执行上面方法时当前变量和常量就已经不相等了。
+
+所以，`elementData == DEFAULTCAPACITY_EMPTY_ELEMENTDATA` 需要满足以下两个条件：
+
+- 使用无参构造实例化对象
+- 没有在数组中添加元素
+
+扩容前处理
+
+```java
+// 需要使数组的大小不能小于需要容纳元素的大小
 private void ensureCapacityInternal(int minCapacity) {
     ensureExplicitCapacity(calculateCapacity(elementData, minCapacity));
 }
-
+// 计算目前需要的最小容量
 private static int calculateCapacity(Object[] elementData, int minCapacity) {
+    // 如果列表在创建是没有传默认值
     if (elementData == DEFAULTCAPACITY_EMPTY_ELEMENTDATA) {
+        // 使用传入大小与默认大小的最大值
         return Math.max(DEFAULT_CAPACITY, minCapacity);
     }
+    // 如果指定了大小或者使用了传入集合的构造，直接使用当前参数的大小
     return minCapacity;
 }
-// 在数组元素小于指定大小时确保当前数组的容量是指定的大小。
+// 在数组元素小于指定大小时确保当前数组的容量到指定的大小。
 private void ensureExplicitCapacity(int minCapacity) {
-    modCount++;
-
-    // overflow-conscious code
+    modCount++; // 结构变化
+    // 如果当缉拿的储存元素的数组小于指定的值，使用grow方法增加数组的大小
     if (minCapacity - elementData.length > 0)
         grow(minCapacity);
 }
@@ -1434,7 +1495,192 @@ private void ensureExplicitCapacity(int minCapacity) {
 
 
 
+将数组容量扩容到指定大小
+
+```java
+private void grow(int minCapacity) {
+    // 获取到当前数组的大小
+    int oldCapacity = elementData.length;
+    // 计算出需要的新大小
+    int newCapacity = oldCapacity + (oldCapacity >> 1);
+    // 如果新的大小小于传入的大小
+    if (newCapacity - minCapacity < 0)
+        // 将新的大小设置为传入的大小
+        newCapacity = minCapacity;
+    // 新的大小大于数组的最大值
+    if (newCapacity - MAX_ARRAY_SIZE > 0)
+        // 需要使用hugeCapacity获取到需要设置的最大值
+        newCapacity = hugeCapacity(minCapacity);
+    // 复制数组到新空间中
+    elementData = Arrays.copyOf(elementData, newCapacity);
+}
+```
+
+
+
+```java
+private static int hugeCapacity(int minCapacity) {
+    // 传入的大小小于0，参数是错误的需要抛出异常
+    if (minCapacity < 0) // overflow
+        throw new OutOfMemoryError();
+    // 如果传入的值大于指定的数组最大值，则需要返回Integer的最大值
+    // 否则返回规定的数组最大值
+    return (minCapacity > MAX_ARRAY_SIZE) ?
+        Integer.MAX_VALUE :
+        MAX_ARRAY_SIZE;
+}
+```
+
+
+
 ###### 批量新增
+
+
+
+```java
+public boolean addAll(Collection<? extends E> c) {
+    Object[] a = c.toArray();
+    int numNew = a.length;
+    ensureCapacityInternal(size + numNew);  // Increments modCount
+    System.arraycopy(a, 0, elementData, size, numNew);
+    size += numNew;
+    return numNew != 0;
+}
+```
+
+
+
+```java
+public boolean addAll(int index, Collection<? extends E> c) {
+    rangeCheckForAdd(index);
+
+    Object[] a = c.toArray();
+    int numNew = a.length;
+    ensureCapacityInternal(size + numNew);  // Increments modCount
+
+    int numMoved = size - index;
+    if (numMoved > 0)
+        System.arraycopy(elementData, index, elementData, index + numNew,
+                         numMoved);
+
+    System.arraycopy(a, 0, elementData, index, numNew);
+    size += numNew;
+    return numNew != 0;
+}
+```
+
+
+
+###### 删除元素
+
+
+
+```java
+public E remove(int index) {
+    rangeCheck(index);
+
+    modCount++;
+    E oldValue = elementData(index);
+
+    int numMoved = size - index - 1;
+    if (numMoved > 0)
+        System.arraycopy(elementData, index+1, elementData, index,
+                         numMoved);
+    elementData[--size] = null; // clear to let GC do its work
+
+    return oldValue;
+}
+```
+
+
+
+```java
+public boolean remove(Object o) {
+    if (o == null) {
+        for (int index = 0; index < size; index++)
+            if (elementData[index] == null) {
+                fastRemove(index);
+                return true;
+            }
+    } else {
+        for (int index = 0; index < size; index++)
+            if (o.equals(elementData[index])) {
+                fastRemove(index);
+                return true;
+            }
+    }
+    return false;
+}
+```
+
+
+
+```java
+private void fastRemove(int index) {
+    modCount++;
+    int numMoved = size - index - 1;
+    if (numMoved > 0)
+        System.arraycopy(elementData, index+1, elementData, index,
+                         numMoved);
+    elementData[--size] = null; // clear to let GC do its work
+}
+```
+
+
+
+```java
+E elementData(int index) {
+    return (E) elementData[index];
+}
+```
+
+
+
+```java
+public void clear() {
+    modCount++;
+
+    // clear to let GC do its work
+    for (int i = 0; i < size; i++)
+        elementData[i] = null;
+
+    size = 0;
+}
+```
+
+
+
+###### 修改元素
+
+
+
+```java
+public E set(int index, E element) {
+    rangeCheck(index);
+
+    E oldValue = elementData(index);
+    elementData[index] = element;
+    return oldValue;
+}
+```
+
+
+
+###### 查询元素
+
+
+
+```java
+public E get(int index) {
+    rangeCheck(index);
+
+    return elementData(index);
+}
+```
+
+
+
+
 
 
 
@@ -1455,40 +1701,6 @@ public void trimToSize() {
 }
 ```
 
-
-
-设置数组的最小容量
-
-```java
-public void ensureCapacity(int minCapacity) {
-    int minExpand = (elementData != DEFAULTCAPACITY_EMPTY_ELEMENTDATA)
-        // any size if not default element table
-        ? 0
-        // larger than default for default empty table. It's already
-        // supposed to be at default size.
-        : DEFAULT_CAPACITY;
-
-    if (minCapacity > minExpand) {
-        ensureExplicitCapacity(minCapacity);
-    }
-}
-```
-
-将数组容量扩容到指定大小
-
-```java
-private void grow(int minCapacity) {
-    // overflow-conscious code
-    int oldCapacity = elementData.length;
-    int newCapacity = oldCapacity + (oldCapacity >> 1);
-    if (newCapacity - minCapacity < 0)
-        newCapacity = minCapacity;
-    if (newCapacity - MAX_ARRAY_SIZE > 0)
-        newCapacity = hugeCapacity(minCapacity);
-    // minCapacity is usually close to size, so this is a win:
-    elementData = Arrays.copyOf(elementData, newCapacity);
-}
-```
 
 
 
