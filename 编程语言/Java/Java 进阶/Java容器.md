@@ -992,7 +992,7 @@ private String outOfBoundsMsg(int index) {
 
 输出两个信息，当前越界的下标 `index` 和元素数量 `size` 。
 
-### 子List
+### SubList
 
 #### 概述
 
@@ -1310,8 +1310,9 @@ public class ArrayList<E> extends AbstractList<E> implements List<E>, RandomAcce
 ```java
 // 集合起始默认的数组长度
 private static final int DEFAULT_CAPACITY = 10;
-// 静态常量，用于给elementData赋值
+// 静态常量，用于给elementData赋值，表示非默认大小的空数组
 private static final Object[] EMPTY_ELEMENTDATA = {};
+// 创建数组列表时没有指定数组默认大小，使用此值表示是默认大小的空数组
 private static final Object[] DEFAULTCAPACITY_EMPTY_ELEMENTDATA = {};
 // 真正储存数据的数组
 transient Object[] elementData; // non-private to simplify nested class access
@@ -1356,6 +1357,8 @@ public ArrayList(int initialCapacity) {
 
 
 
+直接使用集合创建数组列表
+
 
 ```java
 public ArrayList(Collection<? extends E> c) {
@@ -1379,7 +1382,221 @@ public ArrayList(Collection<? extends E> c) {
 
 
 
-##### 
+##### 增删改查
+
+###### 单个新增
+
+
+
+```java
+public boolean add(E e) {
+    ensureCapacityInternal(size + 1);  // Increments modCount!!
+    elementData[size++] = e;
+    return true;
+}
+```
+
+
+
+```java
+public void add(int index, E element) {
+    rangeCheckForAdd(index);
+
+    ensureCapacityInternal(size + 1);  // Increments modCount!!
+    System.arraycopy(elementData, index, elementData, index + 1, size - index);
+    elementData[index] = element;
+    size++;
+}
+```
+
+
+
+```java
+private void ensureCapacityInternal(int minCapacity) {
+    ensureExplicitCapacity(calculateCapacity(elementData, minCapacity));
+}
+
+private static int calculateCapacity(Object[] elementData, int minCapacity) {
+    if (elementData == DEFAULTCAPACITY_EMPTY_ELEMENTDATA) {
+        return Math.max(DEFAULT_CAPACITY, minCapacity);
+    }
+    return minCapacity;
+}
+// 在数组元素小于指定大小时确保当前数组的容量是指定的大小。
+private void ensureExplicitCapacity(int minCapacity) {
+    modCount++;
+
+    // overflow-conscious code
+    if (minCapacity - elementData.length > 0)
+        grow(minCapacity);
+}
+```
+
+
+
+###### 批量新增
+
+
+
+##### 其他方法
+
+###### 修改结构
+
+修改实际数组大小为当前元素的数量，也就是将数组中空值的元素修剪。
+
+```java
+public void trimToSize() {
+    modCount++;
+    if (size < elementData.length) {
+        elementData = (size == 0)
+          ? EMPTY_ELEMENTDATA
+          : Arrays.copyOf(elementData, size);
+    }
+}
+```
+
+
+
+设置数组的最小容量
+
+```java
+public void ensureCapacity(int minCapacity) {
+    int minExpand = (elementData != DEFAULTCAPACITY_EMPTY_ELEMENTDATA)
+        // any size if not default element table
+        ? 0
+        // larger than default for default empty table. It's already
+        // supposed to be at default size.
+        : DEFAULT_CAPACITY;
+
+    if (minCapacity > minExpand) {
+        ensureExplicitCapacity(minCapacity);
+    }
+}
+```
+
+将数组容量扩容到指定大小
+
+```java
+private void grow(int minCapacity) {
+    // overflow-conscious code
+    int oldCapacity = elementData.length;
+    int newCapacity = oldCapacity + (oldCapacity >> 1);
+    if (newCapacity - minCapacity < 0)
+        newCapacity = minCapacity;
+    if (newCapacity - MAX_ARRAY_SIZE > 0)
+        newCapacity = hugeCapacity(minCapacity);
+    // minCapacity is usually close to size, so this is a win:
+    elementData = Arrays.copyOf(elementData, newCapacity);
+}
+```
+
+
+
+###### 获取信息
+
+
+
+获取数组元素数量
+
+```java
+public int size() {
+    return size;
+}
+```
+
+返回数组列表是否为空
+
+```java
+public boolean isEmpty() {
+    return size == 0;
+}
+```
+
+数组列表中是否包含指定元素
+
+```java
+public boolean contains(Object o) {
+    return indexOf(o) >= 0;
+}
+```
+
+返回数组列表中第一个与指定元素相同的元素下标
+
+```java
+public int indexOf(Object o) {
+    if (o == null) {
+        for (int i = 0; i < size; i++)
+            if (elementData[i]==null)
+                return i;
+    } else {
+        for (int i = 0; i < size; i++)
+            if (o.equals(elementData[i]))
+                return i;
+    }
+    return -1;
+}
+```
+
+与上面的方法相反，返回的是匹配的最后一个元素的下标
+
+```java
+public int lastIndexOf(Object o) {
+    if (o == null) {
+        for (int i = size-1; i >= 0; i--)
+            if (elementData[i]==null)
+                return i;
+    } else {
+        for (int i = size-1; i >= 0; i--)
+            if (o.equals(elementData[i]))
+                return i;
+    }
+    return -1;
+}
+```
+
+###### 格式转换
+
+重写 `Object` 类中 `clone` 方法
+
+```java
+public Object clone() {
+    try {
+        ArrayList<?> v = (ArrayList<?>) super.clone();
+        v.elementData = Arrays.copyOf(elementData, size);
+        v.modCount = 0;
+        return v;
+    } catch (CloneNotSupportedException e) {
+        // this shouldn't happen, since we are Cloneable
+        throw new InternalError(e);
+    }
+}
+```
+
+
+
+将数组列表的元素转换为一个数组并返回
+
+
+
+```java
+public Object[] toArray() {
+    return Arrays.copyOf(elementData, size);
+}
+```
+
+
+
+```java
+public <T> T[] toArray(T[] a) {
+    if (a.length < size)
+        // Make a new array of a's runtime type, but my contents:
+        return (T[]) Arrays.copyOf(elementData, size, a.getClass());
+    System.arraycopy(elementData, 0, a, 0, size);
+    if (a.length > size)
+        a[size] = null;
+    return a;
+}
+```
 
 
 
