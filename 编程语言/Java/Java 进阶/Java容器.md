@@ -1291,12 +1291,6 @@ class RandomAccessSubList<E> extends SubList<E> implements RandomAccess {
 
 ![image-20220301200838352](photo/83、ArrayList内部结构图.png) 
 
-#### 迭代器
-
-`ArrayList` 中也实现了迭代器的相关类，包括 `Itr` 和 `ListItr` 类，功能上来说与 `AbstractList` 类中的功能相同只是更加细化。在 `ArrayList` 迭代器类也是 `Itr` 和 `ListItr` 类，其中实现功能与 `AbstractList` 基本相同，只是不用获取迭代器进行遍历，直接使用 `for` 循环即可实现遍历功能。
-
-
-
 #### 分析
 
 ##### 继承结构
@@ -1836,8 +1830,6 @@ public Object clone() {
 
 将数组列表的元素转换为一个数组并返回
 
-
-
 ```java
 public Object[] toArray() {
     return Arrays.copyOf(elementData, size);
@@ -1856,6 +1848,124 @@ public <T> T[] toArray(T[] a) {
         a[size] = null;
     return a;
 }
+```
+
+##### 内部类
+
+在 `ArrayList` 中同样实现类 `Itr` 、`ListItr` 和 `SubList` 类，其中的方法逻辑和功能都与 `AbstractList` 中相同。不过在 `ArrayList` 中不必再使用 `get(index)` 方法获取元素，都是直接使用 `elementData[index]` 来获取，此处就不再赘述。
+
+除此之外在 `ArrayList` 类和上面的内部类中还有一些在 Java 8 中新增的方法，以及 `ArrayList` 中的内部类 `ArrayListSpliterator` 可拆分迭代器的实现类，都会在后面的 Java 8 部分进行介绍。
+
+#### 使用
+
+##### 迭代器
+
+创建一个有元素的 `ArrayList` 对象。
+
+```java
+ArrayList<Integer> list = new ArrayList<>(Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 0));
+```
+
+###### 正向迭代
+
+```java
+ListIterator<Integer> itr = list.listIterator();
+while (itr.hasNext()){
+    System.out.print(itr.next() + " | ");
+}
+```
+
+结果
+
+```
+1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 0 | 
+```
+
+###### 反向迭代
+
+```java
+ListIterator<Integer> itr = list.listIterator(list.size());
+while (itr.hasPrevious()){
+    System.out.print(itr.previous()+" | ");
+}
+```
+
+结果
+
+```
+0 | 9 | 8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 
+```
+
+###### 迭代删除
+
+```java
+ListIterator<Integer> itr = list.listIterator();
+while (itr.hasNext()){
+    if (itr.next()>5)
+        itr.remove();
+}
+System.out.println(list);
+```
+
+结果
+
+```
+[1, 2, 3, 4, 5, 0]
+```
+
+###### 迭代修改
+
+```java
+ListIterator<Integer> itr = list.listIterator();
+while (itr.hasNext()){
+    if (itr.next()>5)
+        itr.set(1);
+}
+System.out.println(list);
+```
+
+结果
+
+```
+[1, 2, 3, 4, 5, 1, 1, 1, 1, 0]
+```
+
+###### 迭代新增
+
+```java
+ListIterator<Integer> itr = list.listIterator();
+while (itr.hasNext()){
+    if (itr.next()>5)
+        itr.add(1);
+}
+System.out.println(list);
+```
+
+结果
+
+```
+[1, 2, 3, 4, 5, 6, 1, 7, 1, 8, 1, 9, 1, 0]
+```
+
+##### 子列表
+
+```java
+List<Integer> subList = list.subList(2, 6);
+System.out.println("sub list 1 ==> " + subList.get(1));
+System.out.println("list     3 ==> " + list.get(3));
+
+subList.set(1, 99);
+System.out.println("sub list ==> " + subList);
+System.out.println("list     ==> " + list);
+```
+
+结果
+
+```
+sub list 1 ==> 4
+list     3 ==> 4
+sub list ==> [3, 99, 5, 6]
+list     ==> [1, 2, 3, 99, 5, 6, 7, 8, 9, 0]
 ```
 
 
@@ -1884,7 +1994,11 @@ public <T> T[] toArray(T[] a) {
 
 #### 迭代器
 
-在上面的 `Iterable` 迭代器接口中还有两个 Java 8 新增的方法没有介绍。
+##### 函数式编程
+
+在 `Iterable` 和 `Iterator` 接口分别有两个相关方法，分别是 `forEach` 和 `forEachRemaining` 方法。
+
+###### forEach
 
 ```java
 // 顺序迭代元素，并对元素执行指定的操作
@@ -1895,6 +2009,84 @@ default void forEach(Consumer<? super T> action) {
     }
 }
 ```
+
+上面的方法是在接口类中定义的 `default` 方法，下面是在 `ArrayList` 方法中的实现。
+
+```java
+@Override
+public void forEach(Consumer<? super E> action) {
+    // 检查参数
+    Objects.requireNonNull(action);
+    // 获取结构修改计数器
+    final int expectedModCount = modCount;
+    @SuppressWarnings("unchecked")
+    // 将Object转为指定形式类型参数
+    final E[] elementData = (E[]) this.elementData;
+    // 获取元素数量
+    final int size = this.size;
+    // 开始遍历
+    for (int i=0; modCount == expectedModCount && i < size; i++) {
+        // 执行操作
+        action.accept(elementData[i]);
+    }
+    // 可能存在并发操作，抛出异常
+    if (modCount != expectedModCount) {
+        throw new ConcurrentModificationException();
+    }
+}
+```
+
+可以看到上面的实现方法在接口类定义的方法上进行了大量的细化，因为 `ArrayList` 中本质是存储着一个数组，所以要将 `Object` 向下转型，且数组在遍历时并不需要迭代器直接使用 `for` 循环即可，并在循环中检查 `modCount` 的值实现 `fail-fast` 功能。
+
+###### forEachRemaining
+
+```java
+default void forEachRemaining(Consumer<? super E> action) {
+    Objects.requireNonNull(action);
+    while (hasNext())
+        action.accept(next());
+}
+```
+
+上面是接口类中的是实现，下面的方法是在 `ArrayList` 的内部类 `Itr` 类的实现。
+
+```java
+@Override
+@SuppressWarnings("unchecked")
+public void forEachRemaining(Consumer<? super E> consumer) {
+    // 检查参数
+    Objects.requireNonNull(consumer);
+    // 获取到元素数量
+    final int size = ArrayList.this.size;
+    // 获取到指针位置
+    int i = cursor;
+    // 如果指针大于等于元素数量
+    // 表示指针目前指向数组中所有元素末尾的空元素
+    if (i >= size) {
+        return;
+    }
+    // 获取到数组对象
+    final Object[] elementData = ArrayList.this.elementData;
+    // 如果当前指针大于等于数组的容量，表示指针已经溢出
+    if (i >= elementData.length) {
+        // 抛出异常
+        throw new ConcurrentModificationException();
+    }
+    // 如果结构无变化且指针没有超出元素边界
+    while (i != size && modCount == expectedModCount) {
+        // 依次对元素进行处理
+        consumer.accept((E) elementData[i++]);
+    }
+    // 更新指针信息
+    cursor = i;
+    lastRet = i - 1;
+    checkForComodification();
+}
+```
+
+首先是对当前指针位置的判断，如果一切正常才会进入 while 循环，在 while 循环中对元素进行逐一的处理，与 `forEach` 同理最后更新指针数据。
+
+##### 可拆分迭代器
 
 
 
@@ -1907,7 +2099,7 @@ default Spliterator<T> spliterator() {
 
 `Spliterator`（ splitable iterator 可分割迭代器）接口是Java为了**并行**遍历数据源中的元素而设计的迭代器，这个接口与Java提供的顺序遍历迭代器 `Iterator` 相比，一个是顺序遍历，一个是并行遍历。
 
-`Iterator` 是 Java 早期产物，但是由于 CPU 的多核化趋势导致顺序遍历已经无法满足性能需求，于是， `Spliterator` 可分割迭代器应运而生。`Spliterator` 的主要原理就是将一个大任务递归拆分成小任务，将各个小任务分配到不同的核中进行处理，最后将结果合并。==Java7的Fork/Join(分支/合并)框架== 
+`Iterator` 是 Java 早期产物，但是由于 CPU 的多核化趋势导致顺序遍历已经无法满足性能需求，于是， `Spliterator` 可分割迭代器应运而生。`Spliterator` 的主要原理就是将一个大任务递归拆分成小任务，将各个小任务分配到不同的核中进行处理，最后将结果合并。
 
 ```java
 // 顺序处理元素
@@ -1923,12 +2115,6 @@ int characteristics();
 具体的并行操作就是使用 `trySplit` 对数组进行分割，以便于进行并行操作提高效率。
 
 批量遍历元素，本质使用 `tryAdvance` 方法。
-
-```java
-default void forEachRemaining(Consumer<? super T> action) {
-    do { } while (tryAdvance(action));
-}
-```
 
 参数类型
 
