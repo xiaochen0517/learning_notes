@@ -1293,7 +1293,9 @@ class RandomAccessSubList<E> extends SubList<E> implements RandomAccess {
 
 #### 迭代器
 
-`ArrayList` 中也实现了迭代器的相关类，包括 `Itr` 和 `ListItr` 类，功能上来说与 `AbstractList` 类中的功能相同只是更加细化。
+`ArrayList` 中也实现了迭代器的相关类，包括 `Itr` 和 `ListItr` 类，功能上来说与 `AbstractList` 类中的功能相同只是更加细化。在 `ArrayList` 迭代器类也是 `Itr` 和 `ListItr` 类，其中实现功能与 `AbstractList` 基本相同，只是不用获取迭代器进行遍历，直接使用 `for` 循环即可实现遍历功能。
+
+
 
 #### 分析
 
@@ -1493,7 +1495,9 @@ private void ensureExplicitCapacity(int minCapacity) {
 }
 ```
 
+在数组进行扩容之前需要对传入的大小进行处理，最后判断是否需要进行扩容。前两个方法是判断当前的对象是由什么构造方法所创建的，以获取传入大小与默认大小的最大值来进行判断数组的最小值的大小。
 
+最后的 `ensureExplicitCapacity` 方法用来判断是否需要扩容，如果当前的数组大小小于指定的数组最小值时就需要使用 `grow` 方法扩容。
 
 将数组容量扩容到指定大小
 
@@ -1516,7 +1520,19 @@ private void grow(int minCapacity) {
 }
 ```
 
+在数组扩容方法中也有一系列的计算，首先获取到当前的数组的大小，然后使用移位将原来的数组大小二进制值向右移动一位，数组的大小肯定也是一个整数所以此操作就是将大小除 2 。然后再加上之前的值最后得出需要的新大小，然后和传入的值进行比较，当增加 1.5 倍的值小于传入的值时那么就使用传入的大小进行扩容。如果传入的值小于增加 1.5 倍的值时，那么就使用计算出来的值进行扩容。
 
+```java
+10100 -> 1010 // 20 -> 10
+1010  -> 101  // 10 -> 5
+111   -> 11   // 7  -> 3
+```
+
+最后需要检查当前扩容后的大小是否会超过数组大小的最大值，也就是超过 `Integer` 的最大值减 8 ，那么就需要使用 `hugeCapacity` 将数组扩容大小设置为 `Integer` 的最大值，最后使用工具类的 `copyOf` 进行扩容。
+
+这两个判断也是用来避免溢出的，当计算出的扩容值溢出时就会使用传入的参数，如果传入的参数也溢出了，那么就会使用 `hugeCapacity` 抛出异常。
+
+检查溢出及设置最大扩容大小
 
 ```java
 private static int hugeCapacity(int minCapacity) {
@@ -1531,102 +1547,137 @@ private static int hugeCapacity(int minCapacity) {
 }
 ```
 
+检查传入的值是否存在溢出，需要抛出异常。不存在则需要判断传入的大小是否大于数组大小的最大值，大于这需要使用 `Integer` 的最大值。
+
+
+
+疑惑
+
+
+如果addAll方法里，在添加集合时候，list里面已经放满int最大值的元素了，并且传入的要添加的集合也是一个满的，在执行 size+numNew的时候已经就溢出了。在进入ensureExplicitCapacity方法之后
+
+这一步，减的时候就相当于-2去减int的最大值，得下来是2147483647，是大于0，也会进入grow方法。
+
+接下来第一个判断就是(-1073741826) - (-2)最后是一个负数-1073741824，然后newCapacity就变成了minCapacity，也就是-2，但是在最后一个判断实际上计算的是 (-2) - (Integer.MAX_VALUE - 8) 最后算下来是一个负数 -2147483641，也就是不会执行hugeCapacity方法去判断minCapacity是否溢出的，直接拿着-2去copyOf扩容数组了，最后就抛出了NegativeArraySizeException
+
 
 
 ###### 批量新增
 
-
+在当前的数组尾部新增一组新的元素
 
 ```java
 public boolean addAll(Collection<? extends E> c) {
+    // 将集合转为数组
     Object[] a = c.toArray();
+    // 获取到数组大小
     int numNew = a.length;
+    // 扩容数组
     ensureCapacityInternal(size + numNew);  // Increments modCount
+    // 将数组复制到当前数组末尾
     System.arraycopy(a, 0, elementData, size, numNew);
+    // 增加size
     size += numNew;
+    // 数组中是否有元素，即是否新增成功
     return numNew != 0;
 }
 ```
 
-
+在数组的指定位置添加一组元素
 
 ```java
 public boolean addAll(int index, Collection<? extends E> c) {
+    // 检查下标
     rangeCheckForAdd(index);
-
+    // 转为数组
     Object[] a = c.toArray();
     int numNew = a.length;
+    // 数组扩容
     ensureCapacityInternal(size + numNew);  // Increments modCount
-
+    // 当前list中的数组需要移动的大小
     int numMoved = size - index;
+    // 是否需要移动
     if (numMoved > 0)
-        System.arraycopy(elementData, index, elementData, index + numNew,
-                         numMoved);
-
+        // 移动插入下标及之后的元素
+        System.arraycopy(elementData, index, elementData, index + numNew, numMoved);
+    // 将元素插入指定位置
     System.arraycopy(a, 0, elementData, index, numNew);
+    // 增加size
     size += numNew;
+    // 数组中是否有元素，即是否新增成功
     return numNew != 0;
 }
 ```
 
-
+批量新增和单个新增的逻辑基本相同，也是使用 `arraycopy` 方法来进行赋值和移动。
 
 ###### 删除元素
 
-
+删除指定下标的元素
 
 ```java
 public E remove(int index) {
+    // 检查下标
     rangeCheck(index);
-
+    // 修改结构
     modCount++;
+    // 获取到目前下标处存放的值
     E oldValue = elementData(index);
-
+    // 删除下标元素后需要移动的元素的个数
     int numMoved = size - index - 1;
     if (numMoved > 0)
-        System.arraycopy(elementData, index+1, elementData, index,
-                         numMoved);
+        // 将指定下标的元素直接覆盖，实现删除操作
+        System.arraycopy(elementData, index+1, elementData, index, numMoved);
+    // 在移动之后将最后面一个重复的元素删除
     elementData[--size] = null; // clear to let GC do its work
-
+    // 返回之前下标处存放的元素
     return oldValue;
 }
 ```
 
-
+删除指定内容的元素
 
 ```java
 public boolean remove(Object o) {
+    // 删除内容为空
     if (o == null) {
+        // 遍历查询为空的元素的下标，并移除元素
         for (int index = 0; index < size; index++)
             if (elementData[index] == null) {
+                // 移除指定下标的元素
                 fastRemove(index);
                 return true;
             }
     } else {
         for (int index = 0; index < size; index++)
+            // 匹配指定内容的元素并移除
             if (o.equals(elementData[index])) {
                 fastRemove(index);
                 return true;
             }
     }
+    // 没有移除任何元素直接返回false
     return false;
 }
 ```
 
-
+移除指定下标的元素
 
 ```java
 private void fastRemove(int index) {
+    // 结构修改
     modCount++;
+    // 计算是否需要移动后面的元素
     int numMoved = size - index - 1;
     if (numMoved > 0)
-        System.arraycopy(elementData, index+1, elementData, index,
-                         numMoved);
+        // 移动元素
+        System.arraycopy(elementData, index+1, elementData, index, numMoved);
+    // 最后的重复元素清空
     elementData[--size] = null; // clear to let GC do its work
 }
 ```
 
-
+返回指定下标的元素内容
 
 ```java
 E elementData(int index) {
@@ -1634,16 +1685,16 @@ E elementData(int index) {
 }
 ```
 
-
+清除所有元素
 
 ```java
 public void clear() {
+    // 结构修改
     modCount++;
-
-    // clear to let GC do its work
+    // 遍历清除
     for (int i = 0; i < size; i++)
         elementData[i] = null;
-
+    // 清空size
     size = 0;
 }
 ```
@@ -1652,7 +1703,7 @@ public void clear() {
 
 ###### 修改元素
 
-
+修改指定下标的元素
 
 ```java
 public E set(int index, E element) {
@@ -1668,7 +1719,7 @@ public E set(int index, E element) {
 
 ###### 查询元素
 
-
+获取指定下标的元素
 
 ```java
 public E get(int index) {
@@ -1679,58 +1730,6 @@ public E get(int index) {
 ```
 
 
-
-
-
-
-
-##### 其他方法
-
-###### 修改结构
-
-修改实际数组大小为当前元素的数量，也就是将数组中空值的元素修剪。
-
-```java
-public void trimToSize() {
-    modCount++;
-    if (size < elementData.length) {
-        elementData = (size == 0)
-          ? EMPTY_ELEMENTDATA
-          : Arrays.copyOf(elementData, size);
-    }
-}
-```
-
-
-
-
-###### 获取信息
-
-
-
-获取数组元素数量
-
-```java
-public int size() {
-    return size;
-}
-```
-
-返回数组列表是否为空
-
-```java
-public boolean isEmpty() {
-    return size == 0;
-}
-```
-
-数组列表中是否包含指定元素
-
-```java
-public boolean contains(Object o) {
-    return indexOf(o) >= 0;
-}
-```
 
 返回数组列表中第一个与指定元素相同的元素下标
 
@@ -1765,6 +1764,55 @@ public int lastIndexOf(Object o) {
     return -1;
 }
 ```
+
+
+
+##### 其他方法
+
+###### 修改结构
+
+修改实际数组大小为当前元素的数量，也就是将数组中空值的元素修剪。
+
+```java
+public void trimToSize() {
+    modCount++;
+    if (size < elementData.length) {
+        elementData = (size == 0)
+          ? EMPTY_ELEMENTDATA
+          : Arrays.copyOf(elementData, size);
+    }
+}
+```
+
+
+
+
+###### 获取信息
+
+获取数组元素数量
+
+```java
+public int size() {
+    return size;
+}
+```
+
+返回数组列表是否为空
+
+```java
+public boolean isEmpty() {
+    return size == 0;
+}
+```
+
+数组列表中是否包含指定元素
+
+```java
+public boolean contains(Object o) {
+    return indexOf(o) >= 0;
+}
+```
+
 
 ###### 格式转换
 
