@@ -1856,117 +1856,274 @@ public <T> T[] toArray(T[] a) {
 
 除此之外在 `ArrayList` 类和上面的内部类中还有一些在 Java 8 中新增的方法，以及 `ArrayList` 中的内部类 `ArrayListSpliterator` 可拆分迭代器的实现类，都会在后面的 Java 8 部分进行介绍。
 
-#### 使用
+### AbstractSequentialList
+
+#### 概述
+
+`AbstractSequentialList` 抽象顺序列表此类继承于 `AbstractList` ，其只支持顺序访问在 `get` 、`set` 等方法中统一使用了迭代器进行操作。`LinkedList` 一定意义上也是一个列表，但是其不支持随机访问 `RandomAccess` 原本的 `AbstractList` 类的定义并不满足 `LinkedList` 的实现，`AbstractList` 实现的是随机访问，而 `AbstractSequentialList` 实现的是顺序访问。
+
+![image-20220305115454576](photo/84、AbstractSequentialList继承结构图.png) 
+
+#### 解析
+
+此类的结构非常简单，只有一个无参构造方法，实现了 `get` 、`set`、`add`、`remove`、`addAll` 和 `iterator` 方法，前五个方法的实现全部都使用了迭代器。下面是 `get` 方法的例子。
+
+```java
+public E get(int index) {
+    try {
+        return listIterator(index).next();
+    } catch (NoSuchElementException exc) {
+        throw new IndexOutOfBoundsException("Index: "+index);
+    }
+}
+```
+
+可以看到此方法调用了 `listIterator` 方法，直接指定指针的位置之后进行操作。
+
+```java
+public Iterator<E> iterator() {
+    return listIterator();
+}
+```
+
+此方法用于返回默认迭代器。
+
+## Queue
+
+### 概述
+
+`Queue` 即队列其最大的特点就是先进先出，与栈 `Stack` 正好相反。它可以在队列后进行入队操作 `push` ，也可以在队列前进行出队操作 `pop` ，其中最重要的实现类就是 `LinkedList` 。
+
+### Queue
+
+#### 概述
+
+为在处理前保存元素而设计的集合。除了基本的收集操作外，队列还提供附加的插入、提取和检查操作。这些方法中的每一个都以两种形式存在：一种是在操作失败时抛出异常，另一种是返回一个特定值(NULL或FALSE，具体取决于操作)。后一种形式的INSERT操作专门设计用于容量受限的队列实现；在大多数实现中，INSERT操作不会失败。
+
+![image-20220305125858990](photo/85、Queue继承结构图.png) 
+
+`Queue` 是队列实现的最顶级的接口类，其与 `List` 同样继承了 `Collection` 和 `Iterable` 接口。
+
+#### 方法
+
+##### 入队
+
+首先是 `add` 方法，其与 `ArrayList` 中的功能相似，用于在队列的尾部添加一个元素。
+
+```java
+boolean add(E e);
+```
+
+如果队列中容量已满无法插入对抛出 `IllegalStateException` ，如果成功插入元素则会返回 true 。这个方法会抛出以下异常。
+
+- IllegalStateException ：队列容量不足
+- ClassCastException ：插入元素的类与队列的类不符
+- NullPointerException ：插入的元素为空，此队列不允许空值
+- IllegalArgumentException ：插入元素的属性阻止其被添加进队列中
+
+`offer` 方法，其功能与上面的 `add` 方法相同，不同之处在于其抛出的异常。
+
+```java
+boolean offer(E e);
+```
+
+此方法不会抛出 `IllegalStateException` 异常，在使用一个有着大小限制的队列时，通常使用此方法会比 `add` 方法更加合适，因为一般情况下队列已满导致的元素无法插入是不需要抛出错误的，只需要返回 false 来表示无法插入即可。
+
+##### 出队
+
+`remove` 方法，用于获取并删除此队列的头部元素。
+
+```java
+E remove();
+```
+
+如果队列为空，此方法会抛出 `NoSuchElementException` 异常。
+
+`poll` 方法与上面的 `remove` 方法作用相同。
+
+```java
+E poll();
+```
+
+此方法与上面 `remove` 方法的区别是其不会因为队列为空抛出 `NoSuchElementException` 异常，只会返回 null 。
+
+##### 查询
+
+`element` 只获取头部元素的内容，而不会删除元素。
+
+```java
+E element();
+```
+
+如果队列为空，抛出 `NoSuchElementException` 异常。
+
+`peek` 方法作用与 `element` 方法相同。
+
+```java
+E peek();
+```
+
+此方法在队列为空时返回 null 。
+
+
+
+
+
+### AbstractQueue
+
+#### 概述
+
+`AbstractQueue` 抽象类实现了 `Queue` 接口，并对其中的某些方法进行了实现，其在最大程度上减少底层实现类的工作。
+
+![image-20220305132900110](photo/86、AbstractQueue继承结构图.png) 
+
+其继承结构与 `List` 类似，其继承了 `AbstractCollection` 抽象类并实现了 `Queue` 接口。
+
+#### 方法
+
+此类实现了接口中的 `add` 、 `remove` 、 `element` 、 `addAll` 方法，并重写了父类 `AbstractCollection` 中的 `clear` 方法。
+
+##### add
+
+```java
+public boolean add(E e) {
+    if (offer(e))
+        return true;
+    else
+        throw new IllegalStateException("Queue full");
+}
+```
+
+此方法的功能在上面已经解释过了，在此类中的实现其本质上调用的 offer 方法，在 offer 返回 false 时抛出 `IllegalStateException` 异常。
+
+##### remove
+
+```java
+public E remove() {
+    E x = poll();
+    if (x != null)
+        return x;
+    else
+        throw new NoSuchElementException();
+}
+```
+
+`remove` 方法本质上直接调用了 poll 方法，在返回 null 时抛出 `NoSuchElementException` 异常。
+
+##### element
+
+```java
+public E element() {
+    E x = peek();
+    if (x != null)
+        return x;
+    else
+        throw new NoSuchElementException();
+}
+```
+
+`element` 则是调用了 peek 方法，同样在返回值为空时抛出 `NoSuchElementException` 异常。
+
+##### addAll
+
+```java
+public boolean addAll(Collection<? extends E> c) {
+    if (c == null)
+        throw new NullPointerException();
+    if (c == this)
+        throw new IllegalArgumentException();
+    boolean modified = false;
+    for (E e : c)
+        if (add(e))
+            modified = true;
+    return modified;
+}
+```
+
+此方法只要有一个元素成功入队则就会返回 true ，循环调用 add 方法直至元素全部入队。
+
+##### clear
+
+```java
+public void clear() {
+    while (poll() != null)
+        ;
+}
+```
+
+使用队列中的 poll  方法逐一将元素清空，直至队列为空。
+
+### Deque
+
+#### 概述
+
+支持在两端插入和删除元素的线性集合。DQUE是“双端队列”的缩写，通常读作“Deck”。大多数Deque实现对它们可以包含的元素数量没有固定的限制，但是该接口支持容量受限的Deque以及没有固定大小限制的deque。
+该接口定义了访问双队列两端的元素的方法。提供了插入、移除和检查元素的方法。
+
+#### 方法
+
+在此类中将一个方法分为了两种，如 `add` 方法分为了 `addFirst` 和 `addLast` ，分别用于在队列前后进行添加元素操作。这些方法就不再介绍，下面是一些拥有新功能的方法。
+
+##### 指定移除
+
+下面的方法用于移除指定的元素。
+
+```java
+boolean removeFirstOccurrence(Object o);
+```
+
+此方法用于移除队列中第一个匹配的元素。
+
+```java
+boolean removeLastOccurrence(Object o);
+```
+
+此方法用于移除队列中匹配的最后一个元素。
+
+##### 查询匹配
+
+下面的方法用于查询队列中是否存在匹配的元素
+
+```java
+boolean contains(Object o);
+```
+
+此方法可以返回以下的两个异常，这两个异常是可选的，具体情况取决于实现类的设计。
+
+- ClassCastException ：指定元素的类型与当前队列不匹配。
+- NullPointerException ：指定元素为空，且本队列不支持储存空元素。
 
 ##### 迭代器
 
-创建一个有元素的 `ArrayList` 对象。
+下面是获取迭代器的方法
 
 ```java
-ArrayList<Integer> list = new ArrayList<>(Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 0));
+Iterator<E> iterator();
 ```
 
-###### 正向迭代
+返回正向的迭代器，从头到尾遍历元素。
 
 ```java
-ListIterator<Integer> itr = list.listIterator();
-while (itr.hasNext()){
-    System.out.print(itr.next() + " | ");
-}
+Iterator<E> descendingIterator();
 ```
 
-结果
+获取反向迭代器，从尾到头遍历元素。
 
-```
-1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 0 | 
-```
+### LinkedList
 
-###### 反向迭代
+#### 概述
 
-```java
-ListIterator<Integer> itr = list.listIterator(list.size());
-while (itr.hasPrevious()){
-    System.out.print(itr.previous()+" | ");
-}
-```
 
-结果
 
-```
-0 | 9 | 8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 
-```
+#### 分析
 
-###### 迭代删除
 
-```java
-ListIterator<Integer> itr = list.listIterator();
-while (itr.hasNext()){
-    if (itr.next()>5)
-        itr.remove();
-}
-System.out.println(list);
-```
 
-结果
+### ArrayDeque
 
-```
-[1, 2, 3, 4, 5, 0]
-```
 
-###### 迭代修改
 
-```java
-ListIterator<Integer> itr = list.listIterator();
-while (itr.hasNext()){
-    if (itr.next()>5)
-        itr.set(1);
-}
-System.out.println(list);
-```
-
-结果
-
-```
-[1, 2, 3, 4, 5, 1, 1, 1, 1, 0]
-```
-
-###### 迭代新增
-
-```java
-ListIterator<Integer> itr = list.listIterator();
-while (itr.hasNext()){
-    if (itr.next()>5)
-        itr.add(1);
-}
-System.out.println(list);
-```
-
-结果
-
-```
-[1, 2, 3, 4, 5, 6, 1, 7, 1, 8, 1, 9, 1, 0]
-```
-
-##### 子列表
-
-```java
-List<Integer> subList = list.subList(2, 6);
-System.out.println("sub list 1 ==> " + subList.get(1));
-System.out.println("list     3 ==> " + list.get(3));
-
-subList.set(1, 99);
-System.out.println("sub list ==> " + subList);
-System.out.println("list     ==> " + list);
-```
-
-结果
-
-```
-sub list 1 ==> 4
-list     3 ==> 4
-sub list ==> [3, 99, 5, 6]
-list     ==> [1, 2, 3, 99, 5, 6, 7, 8, 9, 0]
-```
+### PriorityQueue
 
 
 
