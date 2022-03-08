@@ -2117,6 +2117,340 @@ Iterator<E> descendingIterator();
 
 #### 分析
 
+`LinkedList` 中储存数据使用的是其中定义的 `Node` 类，它是一个双向链表下面是它的源码分析。
+
+##### Node
+
+首先是类的定义，其中有一个形式类型参数，定义了其中储存的对象的类型。
+
+```java
+private static class Node<E> {}
+```
+
+下面是储存数据的变量。
+
+```java
+E item; // 当前节点储存的数据
+Node<E> next; // 指向上一个节点的引用
+Node<E> prev; // 指向下一个节点
+```
+
+可以看到，一个节点中储存了它的数据以及上一个和下一个节点的引用，通过这种格式构成了一个双向链表，使其可以进行正序遍历与反序遍历。
+
+下面是 `Node` 节点类中唯一的构造方法。
+
+```java
+Node(Node<E> prev, E element, Node<E> next) {
+    this.item = element;
+    this.next = next;
+    this.prev = prev;
+}
+```
+
+接受三个参数，并分别赋值给成员变量。
+
+##### 构造方法
+
+`LinkedList` 类有两个构造方法，其中的一个是空参构造无任何操作。
+
+```java
+public LinkedList(Collection<? extends E> c) {
+    this();
+    addAll(c);
+}
+```
+
+另一个构造方法接受一个集合，并使用 `addAll` 方法将集合全部添加到当前的 `LinkedList` 对象中。
+
+##### 增删改查
+
+在源码中有许多暴露在外部功能相似的 public 方法，本质上调用的都是同样的 private 方法，从而最大化实现代码复用。
+
+###### 增加元素
+
+下面是增加元素使用的方法的调用链。
+
+```flow
+offer=>operation: offer(E)
+add=>operation: add(E)
+linkLast=>operation: linkLast(E)
+
+
+offer->add->linkLast
+```
+
+```flow
+offerFirst=>operation: offerFirst(E)
+addFirst=>operation: addFirst(E)
+linkFirst=>operation: linkFirst(E)
+
+offerFirst->addFirst->linkFirst
+```
+
+```flow
+offerLast=>operation: offerLast(E)
+addLast=>operation: addLast(E)
+linkLast=>operation: linkLast(E)
+
+offerLast->addLast->linkLast
+```
+
+```flow
+add=>operation: add(index, E)
+x=>condition: index等于size
+linkl=>operation: linkLast(E)
+linkb=>operation: linkBefore(E, Node)
+
+add->x
+x(yes)->linkl
+x(no)->linkb
+```
+
+可以看到，最基础的方法只有三个，分别是 `linkFirst` 、 `linkLast` 、 `linkBefore` ，其中在 `linkBefore` 中还调用了 `node` 方法获取指定下标的节点。
+
+在链表前添加元素
+
+```java
+private void linkFirst(E e) {
+    final Node<E> f = first;
+    final Node<E> newNode = new Node<>(null, e, f);
+    first = newNode;
+    if (f == null)
+        last = newNode;
+    else
+        f.prev = newNode;
+    size++;
+    modCount++;
+}
+```
+
+
+
+
+向链表后添加元素
+
+```java
+void linkLast(E e) {
+    final Node<E> l = last;
+    final Node<E> newNode = new Node<>(l, e, null);
+    last = newNode;
+    if (l == null)
+        first = newNode;
+    else
+        l.next = newNode;
+    size++;
+    modCount++;
+}
+```
+
+
+
+
+在指定节点前添加元素
+
+```java
+void linkBefore(E e, Node<E> succ) {
+    // assert succ != null;
+    final Node<E> pred = succ.prev;
+    final Node<E> newNode = new Node<>(pred, e, succ);
+    succ.prev = newNode;
+    if (pred == null)
+        first = newNode;
+    else
+        pred.next = newNode;
+    size++;
+    modCount++;
+}
+```
+
+
+
+
+返回指定下标的节点
+
+```java
+Node<E> node(int index) {
+    // assert isElementIndex(index);
+
+    if (index < (size >> 1)) {
+        Node<E> x = first;
+        for (int i = 0; i < index; i++)
+            x = x.next;
+        return x;
+    } else {
+        Node<E> x = last;
+        for (int i = size - 1; i > index; i--)
+            x = x.prev;
+        return x;
+    }
+}
+```
+
+
+
+
+
+
+
+###### 增加集合
+
+```flow
+addAll1=>operation: addAll(c)
+addAll2=>operation: addAll(size, c)
+
+addAll1->addAll2
+```
+
+
+
+
+
+添加集合中的元素到当前链表中
+
+```java
+public boolean addAll(Collection<? extends E> c) {
+    return addAll(size, c);
+}
+```
+
+
+
+指定位置添加集合中的元素
+
+```java
+public boolean addAll(int index, Collection<? extends E> c) {
+    checkPositionIndex(index);
+
+    Object[] a = c.toArray();
+    int numNew = a.length;
+    if (numNew == 0)
+        return false;
+
+    Node<E> pred, succ;
+    if (index == size) {
+        succ = null;
+        pred = last;
+    } else {
+        succ = node(index);
+        pred = succ.prev;
+    }
+
+    for (Object o : a) {
+        @SuppressWarnings("unchecked") E e = (E) o;
+        Node<E> newNode = new Node<>(pred, e, null);
+        if (pred == null)
+            first = newNode;
+        else
+            pred.next = newNode;
+        pred = newNode;
+    }
+
+    if (succ == null) {
+        last = pred;
+    } else {
+        pred.next = succ;
+        succ.prev = pred;
+    }
+
+    size += numNew;
+    modCount++;
+    return true;
+}
+```
+
+
+
+###### 删除元素
+
+```flow
+remove=>operation: remove()
+removef=>operation: removeFirst()
+ulf=>operation: unlinkFirst(node)
+
+remove->removef->ulf
+```
+```flow
+x=>condition: first/last
+pf=>operation: pollFirst()
+uf=>operation: unlinkFirst(node)
+pl=>operation: pollLast()
+ul=>operation: unlinkLast(node)
+
+x(yes)->pf->uf
+x(no)->pl->ul
+```
+
+```flow
+poll=>operation: poll()
+ulf=>operation: unlinkFirest(node)
+
+poll->ulf
+```
+
+```flow
+rm=>operation: remove(obj)
+ul=>operation: unlink(node)
+
+rm->ul
+```
+
+
+
+
+
+
+
+```java
+public boolean remove(Object o) {
+    if (o == null) {
+        for (Node<E> x = first; x != null; x = x.next) {
+            if (x.item == null) {
+                unlink(x);
+                return true;
+            }
+        }
+    } else {
+        for (Node<E> x = first; x != null; x = x.next) {
+            if (o.equals(x.item)) {
+                unlink(x);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+```
+
+
+
+```java
+E unlink(Node<E> x) {
+    // assert x != null;
+    final E element = x.item;
+    final Node<E> next = x.next;
+    final Node<E> prev = x.prev;
+
+    if (prev == null) {
+        first = next;
+    } else {
+        prev.next = next;
+        x.prev = null;
+    }
+
+    if (next == null) {
+        last = prev;
+    } else {
+        next.prev = prev;
+        x.next = null;
+    }
+
+    x.item = null;
+    size--;
+    modCount++;
+    return element;
+}
+```
+
 
 
 ### ArrayDeque
