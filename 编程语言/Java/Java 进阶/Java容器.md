@@ -1965,10 +1965,6 @@ E peek();
 
 此方法在队列为空时返回 null 。
 
-
-
-
-
 ### AbstractQueue
 
 #### 概述
@@ -2637,9 +2633,131 @@ public E getLast() {
 
 `ArrayDeque` 与 `LinkdeList` 功能相同，区别在于 `ArrayDeque` 内部使用数组储存元素，而 `LinkdeList` 中使用 `Node` 类来储存元素。
 
+`PriorityQueue` 也是使用数组来存储元素，元素会在数组内使用指定的排序方式进行排序。
 
 
-### PriorityQueue
+
+## Set
+
+
+
+### 概述
+
+
+
+### 接口及抽象类
+
+#### Set接口
+
+最上层的接口是位于 `java.util` 包下的 `Set` 接口，此接口中定义的方法与 `List` 和 `Queue` 等接口的定义基本相同。不同的是 `Set` 接口中定义了一个新的 `hashSet` 方法，用于返回当前集合中所有元素的 `hash` 值之和。
+
+#### AbstractSet
+
+`AbstractSet` 抽象类实现了 `Set` 接口并实现了其中的 `equals` 、 `hashCode` 和 `removeAll` 方法。	
+
+##### 比较
+
+```java
+public boolean equals(Object o) {
+    // 引用地址是否相等
+    if (o == this)
+        return true;
+    // 传入对象是否为set的实例
+    if (!(o instanceof Set))
+        return false;
+    // 将对象转为集合
+    Collection<?> c = (Collection<?>) o;
+    // 判断元素数量是否相等
+    if (c.size() != size())
+        return false;
+    try {
+        // 判断当前集合是否包含传入集合中的所有元素
+        return containsAll(c);
+    } catch (ClassCastException unused)   {
+        return false;
+    } catch (NullPointerException unused) {
+        return false;
+    }
+}
+```
+
+此方法的作用是比较两个传入的对象是否与当前对象相等，下面是比较的流程。
+
+- 判断当前两个对象的引用是否相同，相等返回 true 不相等执行下一步。
+- 判断传入对象是否是 `Set` 接口的实例，是则执行下一步否则返回 false 。
+- 判断两个集合的元素数量是否相等，相等执行下一步不相等返回 false 。
+- 使用 `AbstractCollection` 的 `containsAll` 方法判断当前集合是否包含传入集合的所有元素，有不包含的元素或者抛出异常均返回 false 。
+
+##### 哈希值
+
+```java
+public int hashCode() {
+    int h = 0;
+    // 获取迭代器
+    Iterator<E> i = iterator();
+    // 遍历所有元素
+    while (i.hasNext()) {
+        // 获取元素
+        E obj = i.next();
+        // 如果元素不为空
+        if (obj != null)
+            // 将所有元素的hash值相加
+            h += obj.hashCode();
+    }
+    return h;
+}
+```
+
+集合的 `hash` 值就是当前集合内所有元素的 `hash` 值之和，使用 `Object` 中的 `hashCode` 方法获取到单个元素的 `hash` 值并相加。
+
+##### 移除元素
+
+```java
+public boolean removeAll(Collection<?> c) {
+    // 传入集合不可为空
+    Objects.requireNonNull(c);
+    // 是否存在修改
+    boolean modified = false;
+    // 当前集合大于传入集合
+    if (size() > c.size()) {
+        // 使用迭代器遍历
+        for (Iterator<?> i = c.iterator(); i.hasNext(); )
+            // 移除指定元素
+            modified |= remove(i.next());
+    } else {
+        for (Iterator<?> i = iterator(); i.hasNext(); ) {
+            // 判断传入集合是否包含当前集合元素
+            if (c.contains(i.next())) {
+                i.remove();
+                modified = true;
+            }
+        }
+    }
+    return modified;
+}
+```
+
+移除方法分为两种情况，一是传入的集合小于当前的集合，二是传入的集合大于当前的集合。前者直接使用 `remove` 移除即可，后者需要使用遍历并判断传入集合是否包含当前集合，再进行移除操作。
+
+### HashSet
+
+
+
+### LinkedHashSet
+
+
+
+### SortedSet
+
+
+
+### NavigableSet
+
+
+
+### TreeSet
+
+
 
 
 
