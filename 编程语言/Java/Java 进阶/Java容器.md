@@ -2212,83 +2212,113 @@ x(no)->linkb
 
 ```java
 private void linkFirst(E e) {
+    // 获取第一个节点
     final Node<E> f = first;
+    // 新建节点
     final Node<E> newNode = new Node<>(null, e, f);
+    // 将第一个节点设置为新建的节点
     first = newNode;
+    // 如果之前获取的第一个节点为空
     if (f == null)
+        // 当前链表只有一个节点
         last = newNode;
     else
+        // 将之前的第一个节点的上一个节点设置为当前节点
         f.prev = newNode;
+    // 大小及计数器修改
     size++;
     modCount++;
 }
 ```
 
+这个方法具体有三步操作
 
+- 新建节点，同时将获取到的第一个节点设置为当前节点的下一个节点 next ，如果 first 为空也不影响链表
+- 将当前节点设置为第一个节点 first
+- 判断当前的链表是否没有节点，若有元素则需要将之前的第一个节点的 prev 设置为当前节点
 
 
 向链表后添加元素
 
 ```java
 void linkLast(E e) {
+    // 获取最后一个节点
     final Node<E> l = last;
+    // 新建节点
     final Node<E> newNode = new Node<>(l, e, null);
+    // 设置尾节点
     last = newNode;
+    // 之前尾节点是否为空
     if (l == null)
+        // 设置第一个节点为当前节点
         first = newNode;
     else
+        // 将之前尾节点的下一个节点设置为当前节点
         l.next = newNode;
+    // 修改计数器
     size++;
     modCount++;
 }
 ```
 
-
+上面的方法与在头部添加节点的方法 `linkFirst` 方法正好相反，所有的步骤均相同。
 
 
 在指定节点前添加元素
 
 ```java
 void linkBefore(E e, Node<E> succ) {
-    // assert succ != null;
+    // 获取到需要在之前的添加节点的节点的上一个节点
     final Node<E> pred = succ.prev;
+    // 新建节点，同时设置其前后节点
     final Node<E> newNode = new Node<>(pred, e, succ);
+    // 将需要在其之前添加的节点的上一个节点设置为当前节点
     succ.prev = newNode;
+    // 判断传入的succ是否为第一个节点
     if (pred == null)
+        // 将首节点设置为当前节点
         first = newNode;
     else
+        // 将上一个节点的next设置为当前节点
         pred.next = newNode;
     size++;
     modCount++;
 }
 ```
 
+上面的方法具体有一下几步操作
 
+- 新建节点并将传入的链表已有节点设置为当前节点的下一个节点，将传入节点的上一个节点设置为当前链表的上一个节点。
+- 设置传入节点的上一个节点为当前节点
+- 判断传入的节点是否为当前链表的第一个节点，设置首节点或者设置上一个节点的下一个节点为当前节点。
 
 
 返回指定下标的节点
 
 ```java
 Node<E> node(int index) {
-    // assert isElementIndex(index);
-
-    if (index < (size >> 1)) {
+    // 判断index是前半部分还是后半部分
+    if (index < (size >> 1)) { // 前半部分
+        // 获取首节点
         Node<E> x = first;
+        // 从前向后遍历
         for (int i = 0; i < index; i++)
             x = x.next;
+        // 遍历到指定的下标后返回
         return x;
-    } else {
+    } else { // 后半部分
+        // 获取到尾节点
         Node<E> x = last;
+        // 从后向前遍历
         for (int i = size - 1; i > index; i--)
             x = x.prev;
+        // 获取到指定下标节点返回
         return x;
     }
 }
 ```
 
-
-
-
+因为链表无法随机访问，只可以通过遍历去获取指定下标的节点，因此在此方法中做了一个小优化。首先判断传入的下标属于链表的前半部分还是后半部分，从而来决定当前遍历是从前向后还是从后向前，从而增加获取指定下标节点的速度。
 
 
 
@@ -2301,10 +2331,6 @@ addAll2=>operation: addAll(size, c)
 addAll1->addAll2
 ```
 
-
-
-
-
 添加集合中的元素到当前链表中
 
 ```java
@@ -2313,52 +2339,75 @@ public boolean addAll(Collection<? extends E> c) {
 }
 ```
 
-
+`addAll(coll)` 方法是默认调用其重载方法 `addAll(index,coll)` ，默认向链表末尾插入集合。
 
 指定位置添加集合中的元素
 
 ```java
 public boolean addAll(int index, Collection<? extends E> c) {
+    // 检查index
     checkPositionIndex(index);
-
+    // 将集合转为数组
     Object[] a = c.toArray();
+    // 获取数组长度
     int numNew = a.length;
+    // 如果数组为空
     if (numNew == 0)
+        // 返回false
         return false;
-
+    // 定义前后节点
     Node<E> pred, succ;
+    // 如果当前index为链表大小
     if (index == size) {
+        // 设置后节点为空
         succ = null;
+        // 前节点为尾节点
         pred = last;
     } else {
+        // 后节点为当前下标的节点
         succ = node(index);
+        // 前节点为后节点的上一个节点
         pred = succ.prev;
     }
-
+    // 遍历添加
     for (Object o : a) {
+        // 强转类型
         @SuppressWarnings("unchecked") E e = (E) o;
+        // 新建节点，将设置前节点
         Node<E> newNode = new Node<>(pred, e, null);
+        // 如果前节点为空
         if (pred == null)
+            // 头节点为当前的节点
             first = newNode;
         else
+            // 前节点的下一个节点设置为当前节点
             pred.next = newNode;
+        // 将前节点设置为当前节点
         pred = newNode;
     }
-
+    // 遍历完成后前节点就是当前集合的最后一个节点
+    // 如果后节点为空，说明当前链表无内容或者index==size
     if (succ == null) {
+        // 尾节点设置为当前集合的最后一个节点
         last = pred;
     } else {
+        // 设置当前集合尾节点的next
         pred.next = succ;
+        // 设置后节点的prev
         succ.prev = pred;
     }
-
+    // 修改计数器
     size += numNew;
     modCount++;
     return true;
 }
 ```
 
+`addAll` 方法较为复杂，总结下来有以下几步。
 
+- 获取当前需要添加元素的目标节点与其上一个节点
+- 将集合中的元素遍历添加到上一个节点之后
+- 链接添加好的最后一个节点与目标节点
 
 ###### 删除元素
 
@@ -2394,66 +2443,199 @@ ul=>operation: unlink(node)
 rm->ul
 ```
 
+> 如果 `remove` 方法中传入的是 `null` 或者普通对象，需要在遍历时分别使用双等号或者 `equals` 方法。
 
-
-
-
-
+移除首节点
 
 ```java
-public boolean remove(Object o) {
-    if (o == null) {
-        for (Node<E> x = first; x != null; x = x.next) {
-            if (x.item == null) {
-                unlink(x);
-                return true;
-            }
-        }
-    } else {
-        for (Node<E> x = first; x != null; x = x.next) {
-            if (o.equals(x.item)) {
-                unlink(x);
-                return true;
-            }
-        }
-    }
-    return false;
-}
-```
-
-
-
-```java
-E unlink(Node<E> x) {
-    // assert x != null;
-    final E element = x.item;
-    final Node<E> next = x.next;
-    final Node<E> prev = x.prev;
-
-    if (prev == null) {
-        first = next;
-    } else {
-        prev.next = next;
-        x.prev = null;
-    }
-
-    if (next == null) {
-        last = prev;
-    } else {
-        next.prev = prev;
-        x.next = null;
-    }
-
-    x.item = null;
+private E unlinkFirst(Node<E> f) {
+    // assert f == first && f != null;
+    // 获取节点内容
+    final E element = f.item;
+    // 获取当前节点下一个节点
+    final Node<E> next = f.next;
+    // 将当前节点内容置空，以便gc回收垃圾
+    f.item = null;
+    f.next = null; // help GC
+    // 将首节点指向下一个节点
+    first = next;
+    // 如果下一个节点为空，那么链表中只有一个元素
+    if (next == null)
+        last = null;
+    else
+        // 将下一个节点与当前节点断开链接
+        next.prev = null;
+    // 修改计数器
     size--;
     modCount++;
     return element;
 }
 ```
 
+此方法有一个前提条件，即传入的节点必须是首节点且不可为空。然后将传入节点与之后的节点断开，并将内容置空方便 gc 回收，最后返回节点的内容。
 
+移除尾节点
 
-### ArrayDeque
+```java
+private E unlinkLast(Node<E> l) {
+    // assert l == last && l != null;
+    final E element = l.item;
+    final Node<E> prev = l.prev;
+    l.item = null;
+    l.prev = null; // help GC
+    last = prev;
+    if (prev == null)
+        first = null;
+    else
+        prev.next = null;
+    size--;
+    modCount++;
+    return element;
+}
+```
+
+上面的方法与 `unlinkFirst` 方法步骤相同，只是断开尾节点与上一个节点的链接。
+
+> `unlinkFirst` 和 `unlinkLast` 方法需要传入的节点必须确保是首节点或者尾节点，且不可为空，否则这两个方法会将传入节点之前或之后的节点与链表断开。
+
+移除指定节点
+
+```java
+E unlink(Node<E> x) {
+    // assert x != null;
+    final E element = x.item;
+    // 获取指定节点，前后节点
+    final Node<E> next = x.next;
+    final Node<E> prev = x.prev;
+    // 当前节点是否为头节点
+    if (prev == null) {
+        first = next;
+    } else {
+        prev.next = next;
+        x.prev = null;
+    }
+    // 当前节点是否为尾节点
+    if (next == null) {
+        last = prev;
+    } else {
+        next.prev = prev;
+        x.next = null;
+    }
+    x.item = null;
+    // 设置计数器
+    size--;
+    modCount++;
+    return element;
+}
+```
+
+此方法需要获取前后节点，并判断是否为头节点或者尾节点，再将内容置空并与前后节点断连。
+
+删除所有元素
+
+```java
+public void clear() {
+    // Clearing all of the links between nodes is "unnecessary", but:
+    // - helps a generational GC if the discarded nodes inhabit
+    //   more than one generation
+    // - is sure to free memory even if there is a reachable Iterator
+    for (Node<E> x = first; x != null; ) {
+        Node<E> next = x.next;
+        x.item = null;
+        x.next = null;
+        x.prev = null;
+        x = next;
+    }
+    first = last = null;
+    size = 0;
+    modCount++;
+}
+```
+
+循环遍历清空所有节点的内容及之间的链接。
+
+-==具体回收逻辑需要等待补全== 
+
+###### 修改元素
+
+```java
+public E set(int index, E element) {
+    // 检查index
+    checkElementIndex(index);
+    // 获取到指定下标的节点
+    Node<E> x = node(index);
+    // 获取到当前节点中储存的内容
+    E oldVal = x.item;
+    // 修改节点中的内容
+    x.item = element;
+    // 返回旧值
+    return oldVal;
+}
+```
+
+获取到指定下标的节点并设置新的值，最后返回节点中储存的原值。
+
+###### 查询元素
+
+获取指定下标的元素
+
+```java
+public E get(int index) {
+    // 检查index
+    checkElementIndex(index);
+    return node(index).item;
+}
+```
+
+此方法使用 `node` 方法获取到节点，并将节点中的元素内容返回。
+
+获取首节点一共有四个方法，分别是 `peek` 、`peekFirst` 、`getFirst`  和 `element` 方法，其中 `peek` 和 `peekFirst` 方法内容相同，`element` 方法直接调用了 `getFirst` 方法。
+
+```java
+public E peek() {
+    final Node<E> f = first;
+    return (f == null) ? null : f.item;
+}
+```
+
+获取到首节点，返回其中的内容。
+
+```java
+public E getFirst() {
+    final Node<E> f = first;
+    if (f == null)
+        throw new NoSuchElementException();
+    return f.item;
+}
+```
+
+获取到首节点，若其为空抛出 `NoSuchElementException` 异常，否则返回节点内容。
+
+获取尾节点一共有两个方法，分别是 `peekLast` 和 `getLast` 方法。
+
+```java
+public E peekLast() {
+    final Node<E> l = last;
+    return (l == null) ? null : l.item;
+}
+```
+
+获取并返回尾节点内容，为空直接返回空。
+
+```java
+public E getLast() {
+    final Node<E> l = last;
+    if (l == null)
+        throw new NoSuchElementException();
+    return l.item;
+}
+```
+
+获取尾节点，为空时抛出 `NoSuchElementException` 异常，否则返回节点内容。
+
+> 在获取头尾节点的方法中，`getFirst` 和 `getLast` 方法都会在节点为空时抛出 `NoSuchElementException` 异常，而 `peek` 相关的方法中则会直接返回 `null` 。
+
+`ArrayDeque` 与 `LinkdeList` 功能相同，区别在于 `ArrayDeque` 内部使用数组储存元素，而 `LinkdeList` 中使用 `Node` 类来储存元素。
 
 
 
