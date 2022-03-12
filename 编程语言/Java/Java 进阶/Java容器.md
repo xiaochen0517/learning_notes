@@ -2635,15 +2635,129 @@ public E getLast() {
 
 `PriorityQueue` 也是使用数组来存储元素，元素会在数组内使用指定的排序方式进行排序。
 
+## Map
+
+### 概述
+
+`Map` 与其他容器不同之处在于其保存的是 key-value 的内容，其包含了两个内容即对应的键和值。`Map` 中的键不可以保存相同的内容，即在一个 `Map` 中每个键都是独一无二的，且每个键只可以对应一个值。
+
+
+
+### 接口及抽象类
+
+最上层的类是 `Map` 接口类及其实现类 `AbstractMap` 抽象类。
+
+#### Map
+
+##### 方法介绍
+
+- `int size();` 
+
+获取元素数量
+
+- `boolean isEmpty();` 
+
+map 是否为空
+
+- `boolean containsKey(key)` 
+
+是否包含此 key
+
+- `boolean containsValue(Object value);`
+
+是否包含此 value
+
+- `V get(Object key);` 
+
+使用 key 获取指定的键值对
+
+- `V put(K key, V value);` 
+
+添加键值对元素
+
+- `V remove(Object key);` 
+
+移除指定的元素
+
+- `void putAll(Map<? extends K, ? extends V> m);` 
+
+将指定的 map 添加到本 map 中
+
+- `void clear();` 
+
+清除所有元素
+
+- `Set<K> keySet();` 
+
+将 map 中所有键转为 set 后返回
+
+- `Collection<V> values();` 
+
+将 map 中所有值转为集合后返回
+
+- `Set<Map.Entry<K, V>> entrySet();` 
+
+将 map 中的元素包装为内容为 Entry 的 set 后返回。
+
+- `boolean equals(Object o);` 
+
+比较对象
+
+- `int hashCode();` 
+
+返回当前 map 的 hashcode ，即当前 entrySet 返回对象中的 hash 值之和
+
+
+
+##### 内部接口类
+
+`Map` 接口类内还定义了一个内部接口类 `Entry` ，其中真正储存 key-value 数据，并定义了一系列的存取方法。
+
+- `K getKey();` 
+
+获取 key
+
+- `V getValue();` 
+
+获取 value
+
+- `V setValue(V value);` 
+
+设置 value
+
+- `boolean equals(Object o);` 
+
+比较对象
+
+- `int hashCode();` 
+
+获取当前 Entry 的 hash 值，-==数据结构== 
+
+#### AbstractMap
+
+
+
+
+
+### HashMap
+
+#### 概述
+
+
+
+![image-20220312101826007](photo/88、HashMap继承结构图.png) 
+
+
+
+
+
 
 
 ## Set
 
-
-
 ### 概述
 
-
+`Set` 集合用于储存不重复的元素，其使用元素的 hash code 来检测集合中是否已经存在此元素，从而实现元素不重复的功能。并且 `Set` 集合并不保证有序，即输出的顺序可能不是添加的顺序，而其子类 `SortedSet` 接口则确保元素是有序的，可以按照定义的排序方式进行排序。
 
 ### 接口及抽象类
 
@@ -2740,6 +2854,18 @@ public boolean removeAll(Collection<?> c) {
 移除方法分为两种情况，一是传入的集合小于当前的集合，二是传入的集合大于当前的集合。前者直接使用 `remove` 移除即可，后者需要使用遍历并判断传入集合是否包含当前集合，再进行移除操作。
 
 ### HashSet
+
+#### 概述
+
+`HashSet` 继承自 `AbstractSet` 即实现了 `Set` 接口，其无法确保其中内容的顺序，此类允许使用 `null` 元素，且不是线程安全的。
+
+![image-20220312094417621](photo/87、HashSet继承结构图.png) 
+
+#### 
+
+
+
+
 
 
 
