@@ -951,7 +951,7 @@ protected void removeRange(int fromIndex, int toIndex) {
 
 使用遍历的方法从 `fromIndex` 开始到 `toIndex` 逐个删除元素，其中 `remove` 方法在 `Itr` 类中。`clear` 方法就是从 0 开始，逐一删除元素直到删除完所有元素。
 
-`addAll` 方法用于将传入的 `Collection` 插入到指定的下标元素之前。==此处有疑惑，需要进一步确认== 
+`addAll` 方法用于将传入的 `Collection` 插入到指定的下标元素之前。-==此处有疑惑，需要进一步确认== 
 
 ```java
 public boolean addAll(int index, Collection<? extends E> c) {
@@ -2643,6 +2643,34 @@ public E getLast() {
 
 
 
+### Hash
+
+#### 概述
+
+Hash，一般翻译做散列、杂凑，或音译为哈希，是把任意长度的[输入](https://baike.baidu.com/item/输入/5481954)（又叫做预映射pre-image）通过散列算法变换成固定长度的[输出](https://baike.baidu.com/item/输出/11056752)，该输出就是散列值。这种转换是一种[压缩映射](https://baike.baidu.com/item/压缩映射/5114126)，也就是，散列值的空间通常远小于输入的空间，不同的输入可能会散列成相同的输出，所以不可能从散列值来确定唯一的输入值。简单的说就是一种将任意长度的消息压缩到某一固定长度的[消息摘要](https://baike.baidu.com/item/消息摘要/4547744)的函数。
+
+Hash 通常具有不可逆的特点，因此会被使用在数据库中储存密码，可以有效保护密码安全。
+
+#### Java Hash
+
+在 `Object` 类中有两个相关的方法 `equals` 和 `hashCode` ，前者的作用是比较两个对象是否相等，在 `Object` 类中的定义是比较两个对象的地址是否相等，但是一般情况下会在实际类中重写此方法用来比较对象的内容是否相等，例如 `String` 对象的 `equals` 方法。后者的作用是获取当前对象的 hash 值，在 `Object` 类中的定义是使用对象的内存地址进行计算来获取，在一些情况下需要重写此方法以配合 `equals` 满足一些条件。
+
+hash 值需要满足以下特点：
+
+- 在同一个 java 进程中，一个对象的 hashCode 始终是相同的。
+- 如果两个对象使用 `equals` 比较相等，那么两个对象的 hashCode 也要相等。
+- 如果两个对象的 hashCode 相等，不能代表 `equals` 方法相等，只能说明这两个对象在一个散列储存结构中。
+- 如果两个对象使用 `equals` 比较不相等，那么这两个对象的 hashCode 也应该不同。
+- 如果对象的 `equals` 方法被重写，那么 `hashCode` 方法也应该被重写。
+
+那么，为什么 `equals` 需要和 `hashCode` 一起重写？
+
+首先在 `HashMap` 类中，key 是唯一的不能存在重复的内容，所以在 put 数据时就需要检查当前 map 中是否已经存在此 key 。如果直接使用 equals 则需要逐一比对 map 中所有的 key ，这样的效率是十分低下的，所以就需要用到 hashCode 来进行比较，快速找到当前 map 是否已经存在此 key。
+
+当然在 get 获取 map 的操作中也是同理，包括 `Set` 对象也会有同样的问题，本质上 `HashSet` 使用的就是 `HashMap` 对象。
+
+-==需要补全内容，关于添加获取源码分析== 
+
 ### 接口及抽象类
 
 最上层的类是 `Map` 接口类及其实现类 `AbstractMap` 抽象类。
@@ -3025,7 +3053,7 @@ boolean tryAdvance(Consumer<? super T> action);
 Spliterator<T> trySplit();
 // 剩余多少元素需要遍历
 long estimateSize();
-// ==待定==
+// -==待定==
 int characteristics();
 ```
 
