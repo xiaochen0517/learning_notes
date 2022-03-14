@@ -1010,6 +1010,8 @@ public List<E> subList(int fromIndex, int toIndex) {
 
 ![image-20220228143342830](photo/80、SubList继承结构.png) 
 
+`SubList` 类主要用来分隔 `List` 中的元素，可以将指定下标范围的 `List` 元素作为一个新的 `List` 操作，并在其中通过偏移量 `offset` 来对 `List` 进行增删改查各种操作。
+
 可以看到在方法中使用了 `instanceof` 关键字来判断当前对象是否实现 `RandomAccess` 接口，如果实现则实例化 `RandomAccessSubList` 类，如果没有则实例化 `SubList` 类。
 
 下面是 `RandomAccess` 接口
@@ -1018,9 +1020,21 @@ public List<E> subList(int fromIndex, int toIndex) {
 public interface RandomAccess {}
 ```
 
-可以看到此接口并没有任何定义，只是用来标记数据是否可以被高速随机访问。
+可以看到此接口并没有任何定义，只是用来标记数据是否可以被高速随机访问。`Collections` 工具类中有一个查询方法 `binarySearch` ，此方法通过二分搜索法查询元素，通过 `RandomAccess` 标记此方法会执行不同的子方法。
 
-`SubList` 类主要用来分隔 `List` 中的元素，可以将指定下标范围的 `List` 元素作为一个新的 `List` 操作，并在其中通过偏移量 `offset` 来对 `List` 进行增删改查各种操作。
+```java
+public static <T> int binarySearch(List<? extends T> list, T key, Comparator<? super T> c) {
+    if (c==null)
+        return binarySearch((List<? extends Comparable<? super T>>) list, key);
+
+    if (list instanceof RandomAccess || list.size()<BINARYSEARCH_THRESHOLD)
+        return Collections.indexedBinarySearch(list, key, c);
+    else
+        return Collections.iteratorBinarySearch(list, key, c);
+}
+```
+
+可以看到，如果传入的集合实现了 `RandomAccess` 接口则使用 `indexedBinarySearch` 方法，如果没有实现此接口则使用 `iteratorBinarySearch` 方法。
 
 #### SubList
 
@@ -1299,9 +1313,9 @@ class RandomAccessSubList<E> extends SubList<E> implements RandomAccess {
 public class ArrayList<E> extends AbstractList<E> implements List<E>, RandomAccess, Cloneable, java.io.Serializable {
 ```
 
-`ArrayList` 的继承结构图在上方已经给出，其最终继承了 `AbstractList` 类并实现了 `List` 、`RandomAccess` 和 `Cloneable` 接口。
+`ArrayList` 的继承结构图在上方已经给出，其最终继承了 `AbstractList` 类并实现了 `List` 、`RandomAccess` 和 `Cloneable` 接口。说明此类支持快速访问、重写了 `clone` 方法支持克隆且支持序列化。
 
-##### 成员变量
+##### 类属性
 
 ```java
 // 集合起始默认的数组长度
@@ -1318,7 +1332,7 @@ private int size;
 private static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8;
 ```
 
-
+这些属性中一共有四个静态常量，分为两类 `DEFAULT_CAPACITY` 和 `MAX_ARRAY_SIZE` 分别用来表示默认起始长度和数组最大长度，而 `EMPTY_ELEMENTDATA` 和 `DEFAULTCAPACITY_EMPTY_ELEMENTDATA` 用来标记当前数组是否是默认的空数组。这个值会在数组进行扩容时进行操作。
 
 ##### 构造函数
 
@@ -1332,7 +1346,7 @@ public ArrayList() {
 }
 ```
 
-
+使用 `DEFAULTCAPACITY_EMPTY_ELEMENTDATA` 将当前对象内容标记为是默认长度，当在数组结构改变时此值就会失效。
 
 制定初始化时数组大小构造方法
 
@@ -1353,7 +1367,7 @@ public ArrayList(int initialCapacity) {
 }
 ```
 
-
+如果手动调用 `new ArrayList(0)` 就会将当前数组标记为非默认状态的空数组。
 
 直接使用集合创建数组列表
 
@@ -1378,7 +1392,9 @@ public ArrayList(Collection<? extends E> c) {
 }
 ```
 
+因为在 `ArrayList` 中使用的是 `Object[]` 储存元素，所以传入的集合的类匹配就可以直接使用赋值操作，或者使用 `Arrays` 工具类的 `copyOf` 方法进行赋值。
 
+> 分析完成上面的构造方法发现，当默认在创建 `ArrayList` 不添加元素时，其不会进行创建数组操作只会将当前的状态记录下来，真正的创建新数组申请内存空间的操作则会在扩容方法中进行。
 
 ##### 增删改查
 
@@ -1456,12 +1472,14 @@ public void ensureCapacity(int minCapacity) {
 }
 ```
 
-此处判断的是当前储存元素的数组 `elementData` 变量是否与 `DEFAULTCAPACITY_EMPTY_ELEMENTDATA` 常量相等，与其相等只有一种可能便是使用无参构造实例化对象。但是如果在实例化对象之后，如果添加了元素就会执行下面的元素扩容方法（因为赋值的常量数组大小为 0 是一个空数组），在其中的 `Arrays.copyOf()` 方法之后 `elementData` 变量会引用一个新的数组，于是在执行上面方法时当前变量和常量就已经不相等了。
+首先使用常量标记 `DEFAULTCAPACITY_EMPTY_ELEMENTDATA` ，此标记的作用是表示当前数组是由默认长度（无参构造）方法初始化的，所以此处使用了三元表达式来设置当前元素是否是刚刚初始化的默认状态。
 
 所以，`elementData == DEFAULTCAPACITY_EMPTY_ELEMENTDATA` 需要满足以下两个条件：
 
 - 使用无参构造实例化对象
-- 没有在数组中添加元素
+- 没有修改数组的结构
+
+> 在使用 `add` 方法添加大量元素之前尽量使用 `ensureCapacity` 方法对数组进行预先扩容，以防频繁使用 `add` 方法调用扩容导致性能下降。
 
 扩容前处理
 
@@ -1489,9 +1507,9 @@ private void ensureExplicitCapacity(int minCapacity) {
 }
 ```
 
-在数组进行扩容之前需要对传入的大小进行处理，最后判断是否需要进行扩容。前两个方法是判断当前的对象是由什么构造方法所创建的，以获取传入大小与默认大小的最大值来进行判断数组的最小值的大小。
+在数组进行扩容之前需要对传入的大小进行处理，最后判断是否需要进行扩容。前两个方法是判断当前的对象是由什么构造方法所创建的，以获取传入大小与默认大小的最大值来进行计算当前数组可以容纳所有元素的最小长度。
 
-最后的 `ensureExplicitCapacity` 方法用来判断是否需要扩容，如果当前的数组大小小于指定的数组最小值时就需要使用 `grow` 方法扩容。
+最后的 `ensureExplicitCapacity` 方法用来判断是否需要扩容，如果当前的数组长度小于当前数组需要的最小长度时就需要使用 `grow` 方法扩容。
 
 将数组容量扩容到指定大小
 
@@ -1545,7 +1563,7 @@ private static int hugeCapacity(int minCapacity) {
 
 
 
-疑惑
+==疑惑== 
 
 
 如果addAll方法里，在添加集合时候，list里面已经放满int最大值的元素了，并且传入的要添加的集合也是一个满的，在执行 size+numNew的时候已经就溢出了。在进入ensureExplicitCapacity方法之后
@@ -1603,7 +1621,7 @@ public boolean addAll(int index, Collection<? extends E> c) {
 }
 ```
 
-批量新增和单个新增的逻辑基本相同，也是使用 `arraycopy` 方法来进行赋值和移动。
+批量新增和单个新增的逻辑基本相同，也是使用 `arraycopy` 方法来进行复制并移动。
 
 ###### 删除元素
 
@@ -1693,7 +1711,7 @@ public void clear() {
 }
 ```
 
-
+循环遍历清除数组所有内容。
 
 ###### 修改元素
 
@@ -1702,9 +1720,11 @@ public void clear() {
 ```java
 public E set(int index, E element) {
     rangeCheck(index);
-
+    // 获取当前储存的值
     E oldValue = elementData(index);
+    // 修改值
     elementData[index] = element;
+    // 返回旧值
     return oldValue;
 }
 ```
@@ -1723,17 +1743,16 @@ public E get(int index) {
 }
 ```
 
-
-
 返回数组列表中第一个与指定元素相同的元素下标
 
 ```java
 public int indexOf(Object o) {
+    // 使用双等号匹配空值
     if (o == null) {
         for (int i = 0; i < size; i++)
             if (elementData[i]==null)
                 return i;
-    } else {
+    } else { // 使用 equals 匹配正常值
         for (int i = 0; i < size; i++)
             if (o.equals(elementData[i]))
                 return i;
@@ -1759,8 +1778,6 @@ public int lastIndexOf(Object o) {
 }
 ```
 
-
-
 ##### 其他方法
 
 ###### 修改结构
@@ -1770,15 +1787,13 @@ public int lastIndexOf(Object o) {
 ```java
 public void trimToSize() {
     modCount++;
+    // 当前数组长度大于元素数量
     if (size < elementData.length) {
-        elementData = (size == 0)
-          ? EMPTY_ELEMENTDATA
-          : Arrays.copyOf(elementData, size);
+        // 无元素直接置空，有元素使用 copyOf 对长度和元素数量进行匹配
+        elementData = (size == 0) ? EMPTY_ELEMENTDATA : Arrays.copyOf(elementData, size);
     }
 }
 ```
-
-
 
 
 ###### 获取信息
@@ -1815,9 +1830,13 @@ public boolean contains(Object o) {
 ```java
 public Object clone() {
     try {
+        // 复制 ArrayList 对象
         ArrayList<?> v = (ArrayList<?>) super.clone();
+        // 复制对象中的数组
         v.elementData = Arrays.copyOf(elementData, size);
+        // 将结构修改计数器置空
         v.modCount = 0;
+        // 返回复制的对象
         return v;
     } catch (CloneNotSupportedException e) {
         // this shouldn't happen, since we are Cloneable
@@ -1826,9 +1845,7 @@ public Object clone() {
 }
 ```
 
-
-
-将数组列表的元素转换为一个数组并返回
+将数组列表的元素转换为一个大小匹配的数组返回
 
 ```java
 public Object[] toArray() {
@@ -1836,12 +1853,11 @@ public Object[] toArray() {
 }
 ```
 
-
+将对象中的元素赋值到指定的数组中。
 
 ```java
 public <T> T[] toArray(T[] a) {
     if (a.length < size)
-        // Make a new array of a's runtime type, but my contents:
         return (T[]) Arrays.copyOf(elementData, size, a.getClass());
     System.arraycopy(elementData, 0, a, 0, size);
     if (a.length > size)
@@ -1849,6 +1865,8 @@ public <T> T[] toArray(T[] a) {
     return a;
 }
 ```
+
+如果传入的数组长度小于当前对象内的元素数量，直接返回一个新的数组。如果传入的数组长度大于等于当前对象的元素数量，将当前对象中的元素赋值到传入的数组中并返回。
 
 ##### 内部类
 
@@ -1879,14 +1897,6 @@ public E get(int index) {
 ```
 
 可以看到此方法调用了 `listIterator` 方法，直接指定指针的位置之后进行操作。
-
-```java
-public Iterator<E> iterator() {
-    return listIterator();
-}
-```
-
-此方法用于返回默认迭代器。
 
 ## Queue
 
@@ -2763,7 +2773,82 @@ map 是否为空
 
 #### AbstractMap
 
+##### 概述
 
+
+
+##### SimpleEntry
+
+###### 概述
+
+`SimpleEntry` 是 `AbstractMap` 中的内部静态类，其是真正储存元素数据的类，相当于 `Queue` 中的 `Node` 类。其实现了 `Map` 接口中的 `Entry` 接口，用来储存 map 的 key-value 键值对。
+
+###### 成员变量
+
+```java
+private final K key;
+private V value;
+```
+
+`SimpleEntry` 中只有两个成员变量分别储存 map 的键和值。
+
+###### 构造方法
+
+`SimpleEntry` 类定义了两个构造方法。
+
+```java
+public SimpleEntry(K key, V value) {
+    this.key   = key;
+    this.value = value;
+}
+public SimpleEntry(Entry<? extends K, ? extends V> entry) {
+    this.key   = entry.getKey();
+    this.value = entry.getValue();
+}
+```
+
+分别使用 `key` 和 `value` 来初始化 `Entry` 。
+
+###### 方法
+
+`key` 可以通过 `getKey` 方法获取， `value` 有 get 和 set 两个方法，此类还重写了 `equals` 和 `hashCode` 方法。
+
+```java
+public boolean equals(Object o) {
+    // 如果传入类没有继承 Entry 直接返回 false
+    if (!(o instanceof Map.Entry))
+        return false;
+    // 将传入对象强转为 Entry
+    Map.Entry<?,?> e = (Map.Entry<?,?>)o;
+    // 将 key 和 value 分别比较并返回
+    return eq(key, e.getKey()) && eq(value, e.getValue());
+}
+```
+
+此方法调用了 `AbstractMap` 中的 `eq` 方法，最值进行比较。
+
+```java
+private static boolean eq(Object o1, Object o2) {
+    return o1 == null ? o2 == null : o1.equals(o2);
+}
+```
+
+此方法包含了值为 null 的情况。
+
+获取当前 `Entry` 的 hash 值
+
+```java
+public int hashCode() {
+    return (key   == null ? 0 :   key.hashCode()) ^
+           (value == null ? 0 : value.hashCode());
+}
+```
+
+通过 key 和 value 的 hash 值按位异或之后得出一个新的 hash 值，当其中有任何一个值变化时就会形成一个新的 hash 值。
+
+`AbstractMap` 中还有一个 `SimpleImmutableEntry` 内部类，其功能与 `SimpleEntry` 相同，但是其无法 `setValue` 只能在初始化对象时在构造方法中传值设置 value ，其是一个不可变的 `Entry` 。
+
+##### 构造方法
 
 
 
@@ -2771,9 +2856,369 @@ map 是否为空
 
 #### 概述
 
-
+`HashMap` 是 `Map` 接口最常用的实现，其用于储存 kv 键值对，是非线程安全的容器。
 
 ![image-20220312101826007](photo/88、HashMap继承结构图.png) 
+
+在 JDK 1.8 之前 HashMap 是由数组和链表组成的，数组是 HashMap 的主体，链表则是主要为了解决哈希冲突而存在的（“拉链法”解决冲突）。 JDK1.8 以后的 `HashMap` 在解决哈希冲突时有了较大的变化，当链表长度大于阈值（默认为 8）而当前数组的长度小于 64，会先将数组进行扩容，将链表转化为红黑树，以减少搜索时间。
+
+#### 结构介绍
+
+数组
+
+链表
+
+红黑树
+
+
+
+#### 内部类
+
+##### Node
+
+`Node` 类实现了 `Map` 接口的内部类 `Entry` 接口类，其实现了一个单向链表，其中 `next` 指向下一个节点，并使用 `hash` 、 `key` 和 `value` 来储存 `key` 的 hash值、key 值和 value 值。
+
+```java
+final int hash;
+final K key;
+V value;
+Node<K,V> next;
+```
+
+`Node` 中的方法与 `SimpleEntry` 中的方法相同，不同之处是 `Node` 在 `SimpleEntry` 中添加了一个链表的功能。
+
+##### TreeNode
+
+###### 定义
+
+```java
+static final class TreeNode<K,V> extends LinkedHashMap.Entry<K,V> {
+```
+
+`TreeNode` 类继承了 `LinkedHashMap` 的 `Entry` 类，下面是 `Entry` 的源码。
+
+```java
+static class Entry<K,V> extends HashMap.Node<K,V> {
+    Entry<K,V> before, after;
+    Entry(int hash, K key, V value, Node<K,V> next) {
+        super(hash, key, value, next);
+    }
+}
+```
+
+可以看到此类继承了 `HashMap` 中的 `Node` 类，并定义了 `before` 和 `after` 变量用来储存当前
+
+###### 成员变量
+
+下面是 `TreeNode` 中的成员变量
+
+```java
+TreeNode<K,V> parent;  // 父节点
+TreeNode<K,V> left;    // 左节点
+TreeNode<K,V> right;   // 右节点
+TreeNode<K,V> prev;    // needed to unlink next upon deletion
+boolean red;           // 标记颜色
+```
+
+###### 构造函数
+
+下面是构造函数
+
+```java
+TreeNode(int hash, K key, V val, Node<K,V> next) {
+    super(hash, key, val, next);
+}
+```
+
+此构造函数本质上调用的是 `Node` 类中的构造函数，初始化 `Node` 中的成员变量。
+
+###### 方法
+
+获取根节点
+
+```java
+final TreeNode<K,V> root() {
+    // 循环遍历父节点，直到树的顶端节点
+    for (TreeNode<K,V> r = this, p;;) {
+        if ((p = r.parent) == null)
+            return r;
+        r = p;
+    }
+}
+```
+
+
+
+#### 成员变量
+
+```java
+// 默认初始容量，必须为2的整数次方
+static final int DEFAULT_INITIAL_CAPACITY = 1 << 4; // 16
+// 最大容量
+static final int MAXIMUM_CAPACITY = 1 << 30; // 1073741824
+// 默认负载因子
+static final float DEFAULT_LOAD_FACTOR = 0.75f;
+// 使用红黑树的阈值
+static final int TREEIFY_THRESHOLD = 8;
+// 
+static final int UNTREEIFY_THRESHOLD = 6;
+// 当容器大小大于等于此值就可以使用红黑树
+static final int MIN_TREEIFY_CAPACITY = 64;
+// 保存数据的 Node 数组
+transient Node<K,V>[] table;
+// 保存 entrySet
+transient Set<Map.Entry<K,V>> entrySet;
+// map中元素超过此值时需要进行扩容，此值为 当前容量*负载因子
+int threshold;
+```
+
+##### 负载因子
+
+-==需要修改== 
+
+负载因子变量 `DEFAULT_LOAD_FACTOR` 是用于控制数组中存放数据的疏密程度，此值越接近 1 数组中存放的数据密度越大，链表就会增大。如果越接近 0 则数组中存放的数据也就越少，也就越稀疏。此值越大，会导致链表及树表的大小增加，从而降低查询的效率。而此值越小，数据就会很分散，会更加频繁的调用 `resize` 扩容 map ，因为扩容操作十分耗费资源，所以也会使整体效率大大下降。
+
+负载因子变量 `DEFAULT_LOAD_FACTOR` 是用于 `threshold` 变量配合使用，`threshold` 的作用是判断当前 map 是否需要进行扩容。由于 HashMap 中的数组中的每一个元素都作为一个桶来储存数据，如果桶
+
+#### 构造方法
+
+无参构造
+
+```java
+public HashMap() {
+    this.loadFactor = DEFAULT_LOAD_FACTOR; // all other fields defaulted
+}
+```
+
+默认构造函数，初始化默认的构造因子。
+
+指定初始容量
+
+```java
+public HashMap(int initialCapacity) {
+    this(initialCapacity, DEFAULT_LOAD_FACTOR);
+}
+```
+
+此方法调用下面的方法进行设置容量和默认的构造因子。
+
+设置初始容量和构造因子
+
+```java
+public HashMap(int initialCapacity, float loadFactor) {
+    // 容量不可小于0
+    if (initialCapacity < 0)
+        throw new IllegalArgumentException("Illegal initial capacity: " + initialCapacity);
+    // 容量大于最大值时重置到可接受的额最大值
+    if (initialCapacity > MAXIMUM_CAPACITY)
+        initialCapacity = MAXIMUM_CAPACITY;
+    // 构造因子小于等于0或者当前传入值为非法值
+    if (loadFactor <= 0 || Float.isNaN(loadFactor))
+        throw new IllegalArgumentException("Illegal load factor: " + loadFactor);
+    // 设置构造因子与初始大小
+    this.loadFactor = loadFactor;
+    this.threshold = tableSizeFor(initialCapacity);
+}
+```
+
+`Float` 的 `isNaN` 方法用于判断当前 float 值是否为非法值，及两个 0.0 的 float 相除得到的值—— NaN 。
+
+最后使用 `tableSizeFor` 计算合法的容量
+
+```java
+static final int tableSizeFor(int cap) {
+    int n = cap - 1;
+    n |= n >>> 1;
+    n |= n >>> 2;
+    n |= n >>> 4;
+    n |= n >>> 8;
+    n |= n >>> 16;
+    return (n < 0) ? 1 : (n >= MAXIMUM_CAPACITY) ? MAXIMUM_CAPACITY : n + 1;
+}
+```
+
+由于容量只可以是2的整数次幂，所以需要此方法来找到大于等于指定数的2的整数次幂。2的整数次幂在二进制中有一个特点，即首位为1后面的全都为0。为了找到最接近的数，如果当前的数为16那么就返回16即可，所以需要先将指定的数减一防止漏掉其本身。
+
+现在需要将传入数的二进制格式所有的0都要转换为1，最后再进行加1操作即可以获取到首位为1其余位为0的数。而当使用移位操作符右移移位会保证前两位一定是1，再次右移两位会使前4位一定为1，经过5次位移后最大的 int 值的所有位（32位）都会被覆盖到，最后在返回前将计算出的值加一即可算出大于等于指定数的2的次幂的数。
+
+```text
+1xxx... 原值减一后的二进制数
+11xx... 右移一位并或运算
+1111... 再次右移两位并或运算
+```
+
+下面是添加 map 的构造方法
+
+```java
+public HashMap(Map<? extends K, ? extends V> m) {
+    // 设置加载因子
+    this.loadFactor = DEFAULT_LOAD_FACTOR;
+    // 将 map 添加到本对象中
+    putMapEntries(m, false);
+}
+```
+
+此方法使用 `putMapEntries` 方法将 map 添加入当前的对象中，具体分析将会在下面的批量新增元素的部分。
+
+#### 增删改查
+
+##### 新增元素
+
+新增元素方法此方法传入五个参数，分别是键的 hash 值、键、值、若键存在是否改变值、是否处于创建模式。
+
+```java
+final V putVal(int hash, K key, V value, boolean onlyIfAbsent, boolean evict) {
+    Node<K,V>[] tab; Node<K,V> p; int n, i;
+    // 判断数组有没有初始化
+    if ((tab = table) == null || (n = tab.length) == 0)
+        // resize扩容方法初始化数组
+        n = (tab = resize()).length;
+    
+    // 定位需要设置的key的位置，并判断数组位置是否为空
+    if ((p = tab[i = (n - 1) & hash]) == null)
+        // 直接将键值对写入数组对应位置
+        tab[i] = newNode(hash, key, value, null);
+    // 不为空两种可能
+    // 1. 当前位置已经存在node，或者已经是链表
+    // 2. 当前位置是一个树表
+    else {
+        Node<K,V> e; K k;
+        // 当前数组位置上的node的key和需要设置的key相等
+        if (p.hash == hash && ((k = p.key) == key || (key != null && key.equals(k))))
+            // 当前数组上的node赋值给e，后面会判断是否修改
+            e = p;
+        // 当前的数组上的元素已经是一个树表
+        else if (p instanceof TreeNode)
+            // 将使用添加树表元素方法添加值
+            e = ((TreeNode<K,V>)p).putTreeVal(this, tab, hash, key, value);
+        // 如果当前数组位置上是一个链表，
+        // 且链表第一个node的key和要设置的key不匹配
+        else {
+            // 遍历链表，找到合适的地方设置key
+            for (int binCount = 0; ; ++binCount) {
+                // 当前遍历的node为空，说明现在是链表末尾，此key没有在map中
+                if ((e = p.next) == null) {
+                    // 将key和value打包为node添加到链表末尾
+                    p.next = newNode(hash, key, value, null);
+                    // 如果当前链表大小大于设定值，需要转换为树表
+                    if (binCount >= TREEIFY_THRESHOLD - 1) // -1 for 1st
+                        // 转换为树表
+                        treeifyBin(tab, hash);
+                    break;
+                }
+                // 在链表中匹配到相同的key
+                if (e.hash == hash && ((k = e.key) == key || (key != null && key.equals(k))))
+                    break;
+                // 当前链表节点与要设置的key不匹配，遍历一下个节点
+                p = e;
+            }
+        }
+        // 如果当前匹配到的节点不为空，说明传入的key已经在map中存在。
+        if (e != null) { // existing mapping for key
+            // 获取到旧值
+            V oldValue = e.value;
+            // 需要修改现有值或者旧值为空
+            if (!onlyIfAbsent || oldValue == null)
+                // 将新值写入对应的node
+                e.value = value;
+            // 此方法在 LinkedHashList 中才有具体实现
+            afterNodeAccess(e);
+            // 返回旧值，因为没有改变map结构
+            return oldValue;
+        }
+    }
+    // key和value新增到map中
+    // 修改当前计数器
+    ++modCount;
+    // 如果size的大小应该进行扩容
+    if (++size > threshold)
+        // 扩容map
+        resize();
+    // 此方法在 LinkedHashList 中才有具体实现
+    afterNodeInsertion(evict);
+    return null;
+}
+```
+
+
+
+
+
+```java
+final Node<K,V>[] resize() {
+    Node<K,V>[] oldTab = table;
+    int oldCap = (oldTab == null) ? 0 : oldTab.length;
+    int oldThr = threshold;
+    int newCap, newThr = 0;
+    if (oldCap > 0) {
+        if (oldCap >= MAXIMUM_CAPACITY) {
+            threshold = Integer.MAX_VALUE;
+            return oldTab;
+        }
+        else if ((newCap = oldCap << 1) < MAXIMUM_CAPACITY &&
+                 oldCap >= DEFAULT_INITIAL_CAPACITY)
+            newThr = oldThr << 1; // double threshold
+    }
+    else if (oldThr > 0) // initial capacity was placed in threshold
+        newCap = oldThr;
+    else {               // zero initial threshold signifies using defaults
+        newCap = DEFAULT_INITIAL_CAPACITY;
+        newThr = (int)(DEFAULT_LOAD_FACTOR * DEFAULT_INITIAL_CAPACITY);
+    }
+    if (newThr == 0) {
+        float ft = (float)newCap * loadFactor;
+        newThr = (newCap < MAXIMUM_CAPACITY && ft < (float)MAXIMUM_CAPACITY ?
+                  (int)ft : Integer.MAX_VALUE);
+    }
+    threshold = newThr;
+    @SuppressWarnings({"rawtypes","unchecked"})
+    Node<K,V>[] newTab = (Node<K,V>[])new Node[newCap];
+    table = newTab;
+    if (oldTab != null) {
+        for (int j = 0; j < oldCap; ++j) {
+            Node<K,V> e;
+            if ((e = oldTab[j]) != null) {
+                oldTab[j] = null;
+                if (e.next == null)
+                    newTab[e.hash & (newCap - 1)] = e;
+                else if (e instanceof TreeNode)
+                    ((TreeNode<K,V>)e).split(this, newTab, j, oldCap);
+                else { // preserve order
+                    Node<K,V> loHead = null, loTail = null;
+                    Node<K,V> hiHead = null, hiTail = null;
+                    Node<K,V> next;
+                    do {
+                        next = e.next;
+                        if ((e.hash & oldCap) == 0) {
+                            if (loTail == null)
+                                loHead = e;
+                            else
+                                loTail.next = e;
+                            loTail = e;
+                        }
+                        else {
+                            if (hiTail == null)
+                                hiHead = e;
+                            else
+                                hiTail.next = e;
+                            hiTail = e;
+                        }
+                    } while ((e = next) != null);
+                    if (loTail != null) {
+                        loTail.next = null;
+                        newTab[j] = loHead;
+                    }
+                    if (hiTail != null) {
+                        hiTail.next = null;
+                        newTab[j + oldCap] = hiHead;
+                    }
+                }
+            }
+        }
+    }
+    return newTab;
+}
+```
 
 
 
