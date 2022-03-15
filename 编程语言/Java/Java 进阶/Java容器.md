@@ -2858,7 +2858,7 @@ public int hashCode() {
 
 ![image-20220312101826007](photo/88、HashMap继承结构图.png) 
 
-在 JDK 1.8 之前 HashMap 是由数组和链表组成的，数组是 HashMap 的主体，链表则是主要为了解决哈希冲突而存在的（“拉链法”解决冲突）。 JDK1.8 以后的 `HashMap` 在解决哈希冲突时有了较大的变化，当链表长度大于阈值（默认为 8）而当前数组的长度小于 64，会先将数组进行扩容，将链表转化为红黑树，以减少搜索时间。
+在 JDK 1.8 之前 HashMap 是由数组和链表组成的，数组是 HashMap 的主体，链表则是主要为了解决哈希冲突而存在的（“拉链法”解决冲突）。 JDK1.8 以后的 `HashMap` 在解决哈希冲突时有了较大的变化，当链表长度大于阈值（默认为 8），且当前数组的长度大于等于 64 时将链表转化为红黑树，若链表长度大于阈值而数组大小小于 64 时则会将数组扩容。
 
 #### 结构介绍
 
@@ -3181,6 +3181,10 @@ static final int hash(Object key) {
 
 这也是为什么 hash 值需要进行扰动的原因，最常用的永远是低位的值而高位的值一般情况下并不会使用，所以需要将高位和低位进行混合，使得 hash 值减少碰撞使其更加均衡。
 
+hash 值的范围是 -2147483648 到 2147483648 ，在实际测试中是否扰动并无法明显改变桶中元素的差距。下面是实际此时结果图，并无法区分那个结果是扰动或非扰动。
+
+![image-20220315111922475](photo/99、map扰动合成图.png)
+
 
 
 ##### 数组扩容
@@ -3260,6 +3264,7 @@ final Node<K,V>[] resize() {
                     Node<K,V> next;
                     do {
                         next = e.next;
+                        // 不需要移动
                         if ((e.hash & oldCap) == 0) {
                             if (loTail == null)
                                 loHead = e;
@@ -3267,6 +3272,7 @@ final Node<K,V>[] resize() {
                                 loTail.next = e;
                             loTail = e;
                         }
+                        // 需要移动位置
                         else {
                             if (hiTail == null)
                                 hiHead = e;
@@ -3275,10 +3281,12 @@ final Node<K,V>[] resize() {
                             hiTail = e;
                         }
                     } while ((e = next) != null);
+                    // 移动到新数组的原位置
                     if (loTail != null) {
                         loTail.next = null;
                         newTab[j] = loHead;
                     }
+                    // 移动到新数组的新位置
                     if (hiTail != null) {
                         hiTail.next = null;
                         newTab[j + oldCap] = hiHead;
@@ -3287,29 +3295,125 @@ final Node<K,V>[] resize() {
             }
         }
     }
+    // 返回新的数组
     return newTab;
+}
+```
+
+数组扩容上半部分的初始化操作在注释中已经写的很清楚了，这里就不再赘述，接下来重点分析链表移动的部分。在遍历旧数组时数组当前桶是一个链表就会进入 else 判断部分，此处定义了五个变量，其中前四个变量中 `lo` （ low ）开头的表示低位，即不用移动的元素直接放置在新数组的对应部分即可，而 `hi` （ high ）开头的变量则是需要移动的变量，需要在放置到新数组中新的位置。
+
+如果当前有两个元素的 hash 值，分别是 `1110011011100` 和 `1010111001100` ，当前数组在未扩容前的大小是 16 即 10000 。此时这两个元素是在一个桶中的，即数组中下标为 12 的元素中组成了一个链表，此时我们扩容之后的数组大小是之前的两倍即 32 ，元素所在的桶就变成了 `hash & 31` 。
+
+```ssh
+1110011011100 // 元素1的hash
+0000000001111 // 与16-1进行&运算
+0000000001100 // 旧数组的下标 12
+0000000011111 // 与32-1进行运算
+0000000011100 // 新数组的下标 28
+```
+
+可以看到上面的运算过程，原下标值最大是 4 个 1 而新数组的最大下标值变成了 5 个 1 。而当元素的 hash 值从右到左第5位正好是 1 时，新的数组下标就相当于在旧下标的基础上加二进制数 `10000` ，而这个数正好是旧数组的长度。根据上面描述的规律可以得出，当旧数组长度为 n 某个元素的 hash 值为 h 此元素所在下标值为 x ，那么当 h 的二进制的第 n 位是 1 时，此元素在新数组中的位置为 x + n ，如果第 n 位为 0 时元素在新数组中的下标不变。
+
+```
+1010111001100 // 元素2的hash
+0000000001100 // 旧数组的下标 12
+0000000001100 // 新数组的下标 12
+```
+
+源码中使用了与操作去判断当前 hash 值 n 位的内容，即判断 `e.hash & oldCap` 是否为 0 ，其中 e 是当前需要判断的元素，oldCap 是旧数组的大小。当两个值进行与操作时 hash 值中 n 位的左侧和右侧的部分因为 oldCap 的 0 全部变为 0 ，只有 n 位的数字当其为 0 时结果才会为 0 ，而当其不为 0 时结果也不会为 0 。此时我们就通过此操作得知了这个元素是否应该被移动到新的位置。
+
+![元素是否需要移位](photo/103、元素是否需要移位.png) 
+
+##### 转换树表
+
+```java
+final void treeifyBin(Node<K,V>[] tab, int hash) {
+    int n, index; Node<K,V> e;
+    // 当前数组大小小于 64 对数组进行扩容
+    if (tab == null || (n = tab.length) < MIN_TREEIFY_CAPACITY)
+        resize();
+    // 当前桶不为空
+    else if ((e = tab[index = (n - 1) & hash]) != null) {
+        TreeNode<K,V> hd = null, tl = null;
+        do {
+            // 将元素转换为树表节点
+            TreeNode<K,V> p = replacementTreeNode(e, null);
+            // 当前树表没有设置父节点，即还没有设置根节点
+            if (tl == null)
+                hd = p;
+            // 已经存在父节点
+            else {
+                // 设置当前节点的父节点
+                p.prev = tl;
+                // 设置父节点的下一级节点
+                tl.next = p;
+            }
+            // 设置下次遍历时的父节点为当前节点
+            tl = p;
+            // 更新 e 为当前链表节点的下一个节点
+        } while ((e = e.next) != null);
+        // 将数组指定位置设置为当前根节点
+        if ((tab[index] = hd) != null)
+            // 转化节点
+            hd.treeify(tab);
+    }
 }
 ```
 
 
 
-
-
-hash 值的范围是 -2147483648 到 2147483648 ，数组是无法申请到怎么多的空间的，所以只能退而求其次使用低位的一部分来将元素进行分组储存。而 hash 值是 32 位当直接使用低位时，高位的信息就会被舍弃掉，所以需要 hash 扰动来将低位和高位的值进行混合，使低位也具有高位的部分特征从而增加在使用低位时的随机性。
-
-![image-20220315101907180](photo/97、map扰动后元素分布测试.png) 
-
-
-
-![image-20220315102024619](photo/97、map未扰动元素分布测试.png)
+```java
+TreeNode<K,V> replacementTreeNode(Node<K,V> p, Node<K,V> next) {
+    return new TreeNode<>(p.hash, p.key, p.value, next);
+}
+```
 
 
 
-![image-20220315111922475](photo/99、map扰动合成图.png) 
+```java
+final void treeify(Node<K,V>[] tab) {
+    TreeNode<K,V> root = null;
+    for (TreeNode<K,V> x = this, next; x != null; x = next) {
+        next = (TreeNode<K,V>)x.next;
+        x.left = x.right = null;
+        // 设置当前树表根节点
+        if (root == null) {
+            x.parent = null;
+            x.red = false;
+            root = x;
+        }
+        else {
+            K k = x.key;
+            int h = x.hash;
+            Class<?> kc = null;
+            for (TreeNode<K,V> p = root;;) {
+                int dir, ph;
+                K pk = p.key;
+                if ((ph = p.hash) > h)
+                    dir = -1;
+                else if (ph < h)
+                    dir = 1;
+                else if ((kc == null &&
+                          (kc = comparableClassFor(k)) == null) ||
+                         (dir = compareComparables(kc, k, pk)) == 0)
+                    dir = tieBreakOrder(k, pk);
 
-
-
-
+                TreeNode<K,V> xp = p;
+                if ((p = (dir <= 0) ? p.left : p.right) == null) {
+                    x.parent = xp;
+                    if (dir <= 0)
+                        xp.left = x;
+                    else
+                        xp.right = x;
+                    root = balanceInsertion(root, x);
+                    break;
+                }
+            }
+        }
+    }
+    moveRootToFront(tab, root);
+}
+```
 
 
 
