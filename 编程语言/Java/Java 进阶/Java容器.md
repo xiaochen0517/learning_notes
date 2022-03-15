@@ -2743,9 +2743,7 @@ map 是否为空
 
 - `int hashCode();` 
 
-返回当前 map 的 hashcode ，即当前 entrySet 返回对象中的 hash 值之和
-
-
+返回当前 map 的 hashcode ，即当前所有 `Entry` 对象的 hash 值之和
 
 ##### 内部接口类
 
@@ -2769,7 +2767,7 @@ map 是否为空
 
 - `int hashCode();` 
 
-获取当前 Entry 的 hash 值，-==数据结构== 
+获取当前 Entry 的 hash 值
 
 #### AbstractMap
 
@@ -2809,7 +2807,7 @@ public SimpleEntry(Entry<? extends K, ? extends V> entry) {
 
 分别使用 `key` 和 `value` 来初始化 `Entry` 。
 
-###### 方法
+###### 成员方法
 
 `key` 可以通过 `getKey` 方法获取， `value` 有 get 和 set 两个方法，此类还重写了 `equals` 和 `hashCode` 方法。
 
@@ -2974,11 +2972,13 @@ int threshold;
 
 ##### 负载因子
 
--==需要修改== 
+负载因子变量 `DEFAULT_LOAD_FACTOR` 是用于控制数组中元素的疏密程度，在储存同样数量及同样内容的一批元素时，当此值越接近 1 则整个数组中的元素构成的链表或树表就越大，数组中储存元素的密度也就也大（因为其扩容的阈值大），并减少了 map 的查询效率；当此值越接近 0 时，数组中元素构成的链表或树表就越小，数组中元素的密度也就越小，就增大了 map 的查询效率，但会导致数组频繁扩容，而扩容又是十分耗费性能的操作。这就像一把双刃剑，或大或小都会对 map 的性能造成响应的影响，而 map 中的默认值 0.75 则是一个相对平衡的值。
 
-负载因子变量 `DEFAULT_LOAD_FACTOR` 是用于控制数组中存放数据的疏密程度，此值越接近 1 数组中存放的数据密度越大，链表就会增大。如果越接近 0 则数组中存放的数据也就越少，也就越稀疏。此值越大，会导致链表及树表的大小增加，从而降低查询的效率。而此值越小，数据就会很分散，会更加频繁的调用 `resize` 扩容 map ，因为扩容操作十分耗费资源，所以也会使整体效率大大下降。
+##### 扩容阈值
 
-负载因子变量 `DEFAULT_LOAD_FACTOR` 是用于 `threshold` 变量配合使用，`threshold` 的作用是判断当前 map 是否需要进行扩容。由于 HashMap 中的数组中的每一个元素都作为一个桶来储存数据，如果桶
+为什么说负载因子会影响元素的扩容，原因是由于扩容阈值变量 `threshold` 是通过当前数组容量和负载因子相乘计算得出的。所以负载因子越小导致数组扩容阈值越小，从而就会使数组更加频繁的进行扩容操作，数组的容量就会不断上升。反之扩容阈值较大，数组的容量就会相对较小且更加趋于稳定，所以才会使得链表或树表变得更大。
+
+
 
 #### 构造方法
 
@@ -3059,6 +3059,8 @@ public HashMap(Map<? extends K, ? extends V> m) {
 ```
 
 此方法使用 `putMapEntries` 方法将 map 添加入当前的对象中，具体分析将会在下面的批量新增元素的部分。
+
+
 
 #### 增删改查
 
@@ -3144,46 +3146,115 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent, boolean evict) {
 
 
 
+
+
+##### 哈希扰动
+
+在源码中可以看到 `put` 方法在传入 `putVal` 方法中的第一参数使用 `hash` 方法计算了 key 的 hash 值，下面是 `hash` 方法的源码。
+
+```java
+static final int hash(Object key) {
+    int h;
+    return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
+}
+```
+
+首先 `key` 如果为空直接返回 0 ，不为空时会使用右移加异或操作返回最终值。此时有一个问题，为什么要使用右移加异或操作，直接返回 hash 值不可以吗？
+
+首先，先分析一下扰动具体的操作。
+
+![hash扰动](photo/100、hash扰动.png) 
+
+可以看到在进行扰动操作之后，hash 值的低16位已经同时具有了高低位的部分特点。而在扰动之后也会使元素更加均匀的分布在整个数组中，并相对减少 hash 值的碰撞。
+
+##### 分桶储存
+
+在 map 中主要储存元素的部分是一个数组，而数组中的每一个元素则是链表或者树表的第一个节点，可以将数组的每一个元素看成一个桶，每个桶中储存着多个元素。通过这样的方式可以极大的增加 map 的查询速度，如何计算当前的元素应该储存在那个桶中就成为了这个问题的关键。
+
+可以看到在上面代码的第 9 行有以下代码 `tab[i = (n - 1) & hash]` 其中 `(n - 1) & hash` 就是计算元素所在桶的核心代码。其中 `n` 表示当前数组的大小，而 `hash` 则是当前需要储存或者获取的 key 的 hash 值。首先 `n` 的定义是其为 2 的若干次幂，若 n 的二进制由 x 位的 0 或 1 组成，那么其二进制表示就为 1 和 x-1 位的 0 组成。当执行第一步 `n-1` 时，n 的二进制数字就变成了 x-1 位的 1 。如下图：
+
+![数组大小减一](photo/101、数组大小减一.png) 
+
+此时的 `n-1` 也是当前数组所有下标的最大值，此时使用这个值与 key 的 hash 值进行与运算。由于 hash 值是 32位的二进制数，所以超出 `x-1` 位的数字会全部变成 0 ，留下的只有最右侧 `x-1` 位数，最后的效果就是将原计算好的 hash 值最右侧的 `x-1` 位截取出来作为数组的下标。
+
+![计算桶下标](photo/102、计算桶下标.png) 
+
+这也是为什么 hash 值需要进行扰动的原因，最常用的永远是低位的值而高位的值一般情况下并不会使用，所以需要将高位和低位进行混合，使得 hash 值减少碰撞使其更加均衡。
+
+
+
+##### 数组扩容
+
 ```java
 final Node<K,V>[] resize() {
+    // 获取数组数据
     Node<K,V>[] oldTab = table;
+    // 获取数组长度
     int oldCap = (oldTab == null) ? 0 : oldTab.length;
+    // 获取当前扩容阈值
     int oldThr = threshold;
+    // 
     int newCap, newThr = 0;
+    // 数组长度不为0，数组已经初始化
     if (oldCap > 0) {
+        // 数组长度已经大于等于预设的最大值
         if (oldCap >= MAXIMUM_CAPACITY) {
+            // 扩容阈值设置为int的最大值
             threshold = Integer.MAX_VALUE;
             return oldTab;
         }
-        else if ((newCap = oldCap << 1) < MAXIMUM_CAPACITY &&
-                 oldCap >= DEFAULT_INITIAL_CAPACITY)
-            newThr = oldThr << 1; // double threshold
+        // 将数组大小扩容两倍还小于最大容量，
+        // 且数组大小大于等于默认初始容量
+        else if ((newCap = oldCap << 1) < MAXIMUM_CAPACITY && oldCap >= DEFAULT_INITIAL_CAPACITY)
+            // 将新的扩容阈值设置为当前阈值的双倍
+            newThr = oldThr << 1; 
     }
-    else if (oldThr > 0) // initial capacity was placed in threshold
+    // 数组未初始化
+    // threshold不为0说明调用的构造方法是指定初始大小的，
+    // 数组初始化大小储存在阈值中，所以直接赋值即可
+    else if (oldThr > 0)
         newCap = oldThr;
-    else {               // zero initial threshold signifies using defaults
+    // 数组未初始化，且使用的是默认大小
+    else {
+        // 设置默认大小
         newCap = DEFAULT_INITIAL_CAPACITY;
+        // 计算默认大小下的扩容阈值
         newThr = (int)(DEFAULT_LOAD_FACTOR * DEFAULT_INITIAL_CAPACITY);
     }
+    // 如果当前新阈值为0，说明使用非默认大小初始化
     if (newThr == 0) {
+        // 计算当前的扩容阈值
         float ft = (float)newCap * loadFactor;
+        // 如果当前新的数组大小及计算出的扩容阈值小于容量最大值
+        // 直接使用计算出的扩容阈值，否则使用int的最大值。
         newThr = (newCap < MAXIMUM_CAPACITY && ft < (float)MAXIMUM_CAPACITY ?
                   (int)ft : Integer.MAX_VALUE);
     }
+    // 将新的扩容阈值赋值到成员变量
     threshold = newThr;
     @SuppressWarnings({"rawtypes","unchecked"})
+    // 创建一个新的数组
     Node<K,V>[] newTab = (Node<K,V>[])new Node[newCap];
+    // 将对象中的数组替换
     table = newTab;
+    // 如果旧的数组不为空，说明需要移动内容到新数组
     if (oldTab != null) {
+        // 遍历旧数组
         for (int j = 0; j < oldCap; ++j) {
             Node<K,V> e;
+            // 当前数组元素中有内容
             if ((e = oldTab[j]) != null) {
-                oldTab[j] = null;
+                oldTab[j] = null; // 删除旧数组中的元素
+                // 当前旧数组的元素还没有组成链表
                 if (e.next == null)
+                    // 重新计算元素在旧数组中的桶位置
                     newTab[e.hash & (newCap - 1)] = e;
+                // 如果当前元素位置是一个树表
                 else if (e instanceof TreeNode)
+                    // 将树表放置到新的数组中
                     ((TreeNode<K,V>)e).split(this, newTab, j, oldCap);
-                else { // preserve order
+                // 当前元素位置是一个链表
+                else {
                     Node<K,V> loHead = null, loTail = null;
                     Node<K,V> hiHead = null, hiTail = null;
                     Node<K,V> next;
@@ -3219,6 +3290,22 @@ final Node<K,V>[] resize() {
     return newTab;
 }
 ```
+
+
+
+
+
+hash 值的范围是 -2147483648 到 2147483648 ，数组是无法申请到怎么多的空间的，所以只能退而求其次使用低位的一部分来将元素进行分组储存。而 hash 值是 32 位当直接使用低位时，高位的信息就会被舍弃掉，所以需要 hash 扰动来将低位和高位的值进行混合，使低位也具有高位的部分特征从而增加在使用低位时的随机性。
+
+![image-20220315101907180](photo/97、map扰动后元素分布测试.png) 
+
+
+
+![image-20220315102024619](photo/97、map未扰动元素分布测试.png)
+
+
+
+![image-20220315111922475](photo/99、map扰动合成图.png) 
 
 
 
