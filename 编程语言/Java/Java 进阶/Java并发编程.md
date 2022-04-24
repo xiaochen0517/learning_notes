@@ -3220,7 +3220,7 @@ public class TestMyLock implements BasicLogger {
 -XX:PreBlockSpin
 ```
 
-> 自旋锁在 `JDK1.4.2` 中引入，使用 ``-XX:+UseSpinning` 来开启。`JDK 6` 中变为默认开启，并且引入了自适应的自旋锁（适应性自旋锁）。
+> 自旋锁在 `JDK1.4.2` 中引入，使用 `-XX:+UseSpinning` 来开启。`JDK 6` 中变为默认开启，并且引入了自适应的自旋锁（适应性自旋锁）。
 
 #### 实现
 
