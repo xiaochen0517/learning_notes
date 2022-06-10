@@ -92,11 +92,33 @@ public interface Iterable<T> {
 }
 ```
 
+其中只有一个 `iterator` 方法，用于获取当前容器的迭代器，具体迭代器方法定义在 `Iterator` 接口类中。
+
 **迭代器模式** - **提供一种方法顺序访问一个聚合对象中各个元素，而又无须暴露该对象的内部表示**。
 
 ##### Iterator
 
+`Iterator` 是具体迭代器功能的定义，包含迭代器中的主要方法，用于具体容器中的迭代器具体实现来继承。
 
+###### hasNext
+
+```java
+boolean hasNext();
+```
+
+此方法用于获取是否存在下一个元素，返回一个 `boolean` 值。
+
+###### next
+
+```java
+E next();
+```
+
+返回迭代中的下一个元素，无元素抛出 `NoSuchElementException` 错误。
+
+##### 迭代器与容器的关系
+
+![image-20220609093635599](photo/146、容器迭代器继承结构.png) 
 
 #### 集合接口
 
@@ -2860,16 +2882,6 @@ public int hashCode() {
 
 在 JDK 1.8 之前 HashMap 是由数组和链表组成的，数组是 HashMap 的主体，链表则是主要为了解决哈希冲突而存在的（“拉链法”解决冲突）。 JDK1.8 以后的 `HashMap` 在解决哈希冲突时有了较大的变化，当链表长度大于阈值（默认为 8），且当前数组的长度大于等于 64 时将链表转化为红黑树，若链表长度大于阈值而数组大小小于 64 时则会将数组扩容。
 
-#### 结构介绍
-
-数组
-
-链表
-
-红黑树
-
-
-
 #### 内部类
 
 ##### Node
@@ -3129,7 +3141,7 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent, boolean evict) {
             return oldValue;
         }
     }
-    // key和value新增到map中
+    // key和value新增到map中，map结构发生了变化
     // 修改当前计数器
     ++modCount;
     // 如果size的大小应该进行扩容
@@ -3360,62 +3372,108 @@ final void treeifyBin(Node<K,V>[] tab, int hash) {
 }
 ```
 
+具体转换就不再此说明，具体可到红黑树部分中查看。
 
+##### 移除元素
 
-```java
-TreeNode<K,V> replacementTreeNode(Node<K,V> p, Node<K,V> next) {
-    return new TreeNode<>(p.hash, p.key, p.value, next);
-}
-```
-
-
+移除元素 `remove` 方法调用了 `removeNode` 方法来具体实现移除功能，下面是此方法的源码。
 
 ```java
-final void treeify(Node<K,V>[] tab) {
-    TreeNode<K,V> root = null;
-    for (TreeNode<K,V> x = this, next; x != null; x = next) {
-        next = (TreeNode<K,V>)x.next;
-        x.left = x.right = null;
-        // 设置当前树表根节点
-        if (root == null) {
-            x.parent = null;
-            x.red = false;
-            root = x;
-        }
-        else {
-            K k = x.key;
-            int h = x.hash;
-            Class<?> kc = null;
-            for (TreeNode<K,V> p = root;;) {
-                int dir, ph;
-                K pk = p.key;
-                if ((ph = p.hash) > h)
-                    dir = -1;
-                else if (ph < h)
-                    dir = 1;
-                else if ((kc == null &&
-                          (kc = comparableClassFor(k)) == null) ||
-                         (dir = compareComparables(kc, k, pk)) == 0)
-                    dir = tieBreakOrder(k, pk);
-
-                TreeNode<K,V> xp = p;
-                if ((p = (dir <= 0) ? p.left : p.right) == null) {
-                    x.parent = xp;
-                    if (dir <= 0)
-                        xp.left = x;
-                    else
-                        xp.right = x;
-                    root = balanceInsertion(root, x);
-                    break;
-                }
+// key的hash值、当前key、需要匹配的值、是否在删除前匹配值、树表过小是否修改结构（从树表转为链表）
+final Node<K,V> removeNode(int hash, Object key, Object value, boolean matchValue, boolean movable) {
+    Node<K,V>[] tab; Node<K,V> p; int n, index;
+    // 数组不为空 且 数组已初始化 且 指定桶有值
+    if ((tab = table) != null && (n = tab.length) > 0 &&
+        (p = tab[index = (n - 1) & hash]) != null) {
+        Node<K,V> node = null, e; K k; V v;
+        // 桶中第一个元素是指定元素
+        if (p.hash == hash &&
+            ((k = p.key) == key || (key != null && key.equals(k))))
+            node = p;
+        // 桶中存在一下个元素
+        else if ((e = p.next) != null) {
+            // 当前桶中是一个树表
+            if (p instanceof TreeNode)
+                // 调用树表的方法查找元素
+                node = ((TreeNode<K,V>)p).getTreeNode(hash, key);
+            // 当前桶中是一个链表
+            else {
+                // 使用遍历的方式寻找指定元素
+                do {
+                    if (e.hash == hash &&
+                        ((k = e.key) == key ||
+                         (key != null && key.equals(k)))) {
+                        node = e;
+                        break;
+                    }
+                    p = e;
+                } while ((e = e.next) != null);
             }
         }
+        // 找到指定的元素 且 是否配置值
+        if (node != null && (!matchValue || (v = node.value) == value ||
+                             (value != null && value.equals(v)))) {
+            // 树表删除元素
+            if (node instanceof TreeNode)
+                ((TreeNode<K,V>)node).removeTreeNode(this, tab, movable);
+            // 链表删除元素
+            else if (node == p)
+                tab[index] = node.next;
+            // 桶只有一个元素或是一个链表且指定元素为头部时进行删除
+            else
+                p.next = node.next;
+            ++modCount;
+            --size;
+            afterNodeRemoval(node);
+            // 返回删除的元素
+            return node;
+        }
     }
-    moveRootToFront(tab, root);
+    // 没有找到指定的元素或者在匹配值时失败
+    return null;
 }
 ```
 
+在删除元素时主要分为三种情况。
 
+- 删除的元素在桶中是第一个元素，且当前桶中是一个链表。
+- 删除的元素在链表中或者末尾。
+- 删除的元素所在的桶中是一个树表，元素在树表中。
+
+##### 查找元素
+
+查找元素 `get` 方法调用 `getNode` 实现查找功能，下面是 `getNode` 方法的源码。
+
+```java
+// 当前key的hash值、当前查找元素的key
+final Node<K,V> getNode(int hash, Object key) {
+    Node<K,V>[] tab; Node<K,V> first, e; int n; K k;
+    // 数组不为空且已初始化且指定元素所在桶不为空
+    if ((tab = table) != null && (n = tab.length) > 0 &&
+        (first = tab[(n - 1) & hash]) != null) {
+        // 检查是否为桶中第一个元素
+        if (first.hash == hash && // always check first node
+            ((k = first.key) == key || (key != null && key.equals(k))))
+            return first;
+        // 检查第一个元素后是否还有元素
+        if ((e = first.next) != null) {
+            // 当前桶中是一个树表
+            if (first instanceof TreeNode)
+                return ((TreeNode<K,V>)first).getTreeNode(hash, key);
+            // 当前桶中是一个链表，遍历查找
+            do {
+                if (e.hash == hash &&
+                    ((k = e.key) == key || (key != null && key.equals(k))))
+                    return e;
+            } while ((e = e.next) != null);
+        }
+    }
+    // 没有找到指定元素，返回空
+    return null;
+}
+```
+
+定位到指定桶之后首先检查桶中的第一个元素是否符合条件，之后在根据具体数据结构进行查找元素。
 
 ## Set
 
@@ -3525,7 +3583,7 @@ public boolean removeAll(Collection<?> c) {
 
 ![image-20220312094417621](photo/87、HashSet继承结构图.png) 
 
-#### 
+`HashSet` 本质上使用了一个 `HashMap` 来储存数据，利用 `HashMap` 的 `key` 不会重复的特性进行包装从而实现 `HashSet` 。
 
 
 
